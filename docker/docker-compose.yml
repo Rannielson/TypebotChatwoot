@@ -1,0 +1,113 @@
+version: '3.8'
+
+services:
+  postgres:
+    image: postgres:15-alpine
+    container_name: typebot_connector_postgres
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-typebot_connector}
+      POSTGRES_USER: ${POSTGRES_USER:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
+    ports:
+      - "${POSTGRES_PORT:-5432}:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-postgres}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - connector_network
+
+  redis:
+    image: redis:7-alpine
+    container_name: typebot_connector_redis
+    command: redis-server --appendonly yes
+    ports:
+      - "${REDIS_PORT:-6379}:6379"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - connector_network
+
+  app:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
+    container_name: typebot_connector_app
+    environment:
+      NODE_ENV: ${NODE_ENV:-production}
+      PORT: ${PORT:-3000}
+      POSTGRES_HOST: postgres
+      POSTGRES_PORT: 5432
+      POSTGRES_DB: ${POSTGRES_DB:-typebot_connector}
+      POSTGRES_USER: ${POSTGRES_USER:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+      REDIS_PASSWORD: ${REDIS_PASSWORD:-}
+      JWT_SECRET: ${JWT_SECRET:-your-secret-key-change-in-production}
+      JWT_EXPIRES_IN: ${JWT_EXPIRES_IN:-24h}
+      CHATWOOT_DEFAULT_URL: ${CHATWOOT_DEFAULT_URL:-https://chatconnect.cleoia.com.br}
+      CHATWOOT_DEFAULT_TOKEN: ${CHATWOOT_DEFAULT_TOKEN:-}
+      FRONTEND_URL: ${FRONTEND_URL:-http://localhost:3001}
+      WEBHOOK_URL: ${WEBHOOK_URL:-https://wholesale-praise-desirable-treo.trycloudflare.com/webhook/chatwoot}
+    ports:
+      - "${PORT:-3000}:3000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    volumes:
+      - ../logs:/app/logs
+    restart: unless-stopped
+    networks:
+      - connector_network
+
+  frontend:
+    build:
+      context: ../frontend
+      dockerfile: Dockerfile
+      args:
+        NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-http://localhost:3000/api}
+    container_name: typebot_connector_frontend
+    environment:
+      NODE_ENV: development
+      NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-http://localhost:3000/api}
+    ports:
+      - "${FRONTEND_PORT:-3001}:3001"
+    depends_on:
+      app:
+        condition: service_started
+    restart: unless-stopped
+    networks:
+      - connector_network
+
+  tunnel:
+    image: cloudflare/cloudflared:latest
+    container_name: typebot_connector_tunnel
+    command: tunnel --no-autoupdate --url http://app:3000 --protocol http2
+    depends_on:
+      app:
+        condition: service_started
+    restart: unless-stopped
+    networks:
+      - connector_network
+    environment:
+      TUNNEL_URL: ${TUNNEL_URL:-}
+
+
+volumes:
+  postgres_data:
+  redis_data:
+
+networks:
+  connector_network:
+    driver: bridge
