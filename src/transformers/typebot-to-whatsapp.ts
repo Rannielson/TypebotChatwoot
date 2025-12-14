@@ -205,6 +205,16 @@ export function transformChoiceInputToList(
     return null;
   }
 
+  // Log detalhado de todos os itens recebidos do Typebot
+  console.log(`[TypebotToWhatsApp] 📋 Itens recebidos do Typebot (${choiceInput.items.length} total):`);
+  choiceInput.items.forEach((item, index) => {
+    console.log(`  ${index + 1}. "${item.content}"`, {
+      id: item.id,
+      outgoingEdgeId: item.outgoingEdgeId,
+      displayCondition: item.displayCondition,
+    });
+  });
+
   // Extrai header, body, footer e button text das mensagens
   const textMessages = typebotResponse.messages?.filter(
     (msg): msg is TypebotTextMessage => msg.type === 'text'
@@ -214,13 +224,31 @@ export function transformChoiceInputToList(
 
   // Filtra itens que não têm displayCondition ou têm displayCondition habilitado
   // E também filtra itens sem outgoingEdgeId válido
+  console.log(`[TypebotToWhatsApp] Processando ${choiceInput.items.length} itens para lista interativa`);
+  
   const activeItems = choiceInput.items.filter(
-    (item) => 
-      (!item.displayCondition || item.displayCondition.isEnabled !== false) &&
-      item.outgoingEdgeId && 
-      typeof item.outgoingEdgeId === 'string' && 
-      item.outgoingEdgeId.trim() !== ''
+    (item, index) => {
+      const hasValidDisplayCondition = !item.displayCondition || item.displayCondition.isEnabled !== false;
+      const hasValidOutgoingEdgeId = item.outgoingEdgeId && 
+        typeof item.outgoingEdgeId === 'string' && 
+        item.outgoingEdgeId.trim() !== '';
+      
+      const isActive = hasValidDisplayCondition && hasValidOutgoingEdgeId;
+      
+      if (!isActive) {
+        console.warn(`[TypebotToWhatsApp] Item ${index + 1} ("${item.content}") foi filtrado:`, {
+          hasValidDisplayCondition,
+          hasValidOutgoingEdgeId,
+          displayCondition: item.displayCondition,
+          outgoingEdgeId: item.outgoingEdgeId,
+        });
+      }
+      
+      return isActive;
+    }
   );
+
+  console.log(`[TypebotToWhatsApp] ${activeItems.length} itens ativos de ${choiceInput.items.length} totais`);
 
   // Se não houver itens válidos, retorna null
   if (activeItems.length === 0) {
@@ -229,14 +257,21 @@ export function transformChoiceInputToList(
   }
 
   // Converte itens em rows
-  const rows = activeItems.map((item) => ({
-    id: item.outgoingEdgeId!,
-    title: item.content.substring(0, 24), // Limite do WhatsApp
-    description: undefined, // Typebot não fornece description, mas podemos adicionar no futuro
-  }));
+  const rows = activeItems.map((item, index) => {
+    console.log(`[TypebotToWhatsApp] Adicionando item ${index + 1} à lista: "${item.content}" (id: ${item.outgoingEdgeId})`);
+    return {
+      id: item.outgoingEdgeId!,
+      title: item.content.substring(0, 24), // Limite do WhatsApp
+      description: undefined, // Typebot não fornece description, mas podemos adicionar no futuro
+    };
+  });
+
+  console.log(`[TypebotToWhatsApp] Total de rows criadas: ${rows.length}`);
 
   // Organiza em seções (máximo 10 seções, 10 itens cada)
   const sections = organizeItemsIntoSections(rows);
+  
+  console.log(`[TypebotToWhatsApp] Lista organizada em ${sections.length} seção(ões) com ${sections.reduce((sum, s) => sum + s.rows.length, 0)} item(ns) total`);
 
   if (sections.length === 0) {
     return null;
@@ -295,6 +330,16 @@ export function transformChoiceInputToButtons(
     return null;
   }
 
+  // Log detalhado de todos os itens recebidos do Typebot
+  console.log(`[TypebotToWhatsApp] 📋 Itens recebidos do Typebot (${choiceInput.items.length} total):`);
+  choiceInput.items.forEach((item, index) => {
+    console.log(`  ${index + 1}. "${item.content}"`, {
+      id: item.id,
+      outgoingEdgeId: item.outgoingEdgeId,
+      displayCondition: item.displayCondition,
+    });
+  });
+
   // Se já há mensagens de texto, não repetimos o texto no body dos botões
   // Usamos "escolha uma opção" como texto padrão quando há mensagens anteriores
   const textMessages = typebotResponse.messages?.filter(
@@ -308,13 +353,31 @@ export function transformChoiceInputToButtons(
         : 'Escolha uma opção:');
 
   // Filtra itens ativos e com outgoingEdgeId válido
+  console.log(`[TypebotToWhatsApp] Processando ${choiceInput.items.length} itens para botões interativos`);
+  
   const activeItems = choiceInput.items.filter(
-    (item) => 
-      (!item.displayCondition || item.displayCondition.isEnabled !== false) &&
-      item.outgoingEdgeId && 
-      typeof item.outgoingEdgeId === 'string' && 
-      item.outgoingEdgeId.trim() !== ''
+    (item, index) => {
+      const hasValidDisplayCondition = !item.displayCondition || item.displayCondition.isEnabled !== false;
+      const hasValidOutgoingEdgeId = item.outgoingEdgeId && 
+        typeof item.outgoingEdgeId === 'string' && 
+        item.outgoingEdgeId.trim() !== '';
+      
+      const isActive = hasValidDisplayCondition && hasValidOutgoingEdgeId;
+      
+      if (!isActive) {
+        console.warn(`[TypebotToWhatsApp] Item ${index + 1} ("${item.content}") foi filtrado:`, {
+          hasValidDisplayCondition,
+          hasValidOutgoingEdgeId,
+          displayCondition: item.displayCondition,
+          outgoingEdgeId: item.outgoingEdgeId,
+        });
+      }
+      
+      return isActive;
+    }
   );
+
+  console.log(`[TypebotToWhatsApp] ${activeItems.length} itens ativos de ${choiceInput.items.length} totais`);
 
   // Se não houver itens válidos, retorna null
   if (activeItems.length === 0) {
@@ -322,10 +385,18 @@ export function transformChoiceInputToButtons(
     return null;
   }
 
-  const buttons = activeItems.slice(0, 3).map((item) => ({
-    id: item.outgoingEdgeId!,
-    title: item.content.substring(0, 20),
-  }));
+  // Limita a 3 botões (limite do WhatsApp para interactive buttons)
+  const buttons = activeItems.slice(0, 3).map((item, index) => {
+    console.log(`[TypebotToWhatsApp] Adicionando botão ${index + 1}: "${item.content}" (id: ${item.outgoingEdgeId})`);
+    return {
+      id: item.outgoingEdgeId!,
+      title: item.content.substring(0, 20),
+    };
+  });
+  
+  if (activeItems.length > 3) {
+    console.warn(`[TypebotToWhatsApp] ⚠️ ${activeItems.length} itens disponíveis, mas apenas 3 serão enviados (limite do WhatsApp para botões)`);
+  }
 
   return {
     messaging_product: 'whatsapp',

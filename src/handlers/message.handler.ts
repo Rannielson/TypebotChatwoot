@@ -2,6 +2,7 @@ import { NormalizedChatwootMessage } from '../types/chatwoot';
 import { Inbox } from '../models/inbox.model';
 import { Tenant } from '../models/tenant.model';
 import { TypebotClient } from '../clients/typebot.client';
+import { TypebotStartChatRequest } from '../types/typebot';
 import { WhatsAppClient } from '../clients/whatsapp.client';
 import { ChatwootClient } from '../clients/chatwoot.client';
 import { SessionService } from '../services/session.service';
@@ -11,13 +12,51 @@ import { formatWhatsAppMessageForChatwoot } from '../utils/message-formatter.uti
 import { SessionModel } from '../models/session.model';
 import { TenantModel } from '../models/tenant.model';
 import { redis } from '../config/redis';
+import { messageLogQueue } from '../config/queue.config';
+import { chatwootNoteQueue } from '../config/queue.config';
+import { CacheService } from '../services/cache.service';
 
 export class MessageHandler {
+  /**
+   * Constrói as variáveis pré-preenchidas para o Typebot a partir da mensagem normalizada.
+   * Essas variáveis podem ser usadas no Typebot através de {{nome}}, {{telefone}}, etc.
+   * 
+   * Variáveis disponíveis:
+   * - nome: Nome do contato
+   * - telefone: Número de telefone (apenas dígitos)
+   * - conversa_id: ID da conversa no Chatwoot
+   * - message_id: ID da mensagem
+   * - account_id: ID da conta no Chatwoot
+   * - inbox_id: ID do inbox no Chatwoot
+   * - timestamp: Timestamp da mensagem (ISO 8601)
+   */
+  private buildTypebotVariables(
+    normalizedMessage: NormalizedChatwootMessage,
+    conversationId: number
+  ): Record<string, string> {
+    return {
+      // Informações do contato
+      nome: normalizedMessage.name || 'Usuário',
+      telefone: normalizedMessage.message.remotejid || '',
+      
+      // IDs da conversa e sistema
+      conversa_id: conversationId.toString(),
+      message_id: normalizedMessage.message.message_id || '',
+      
+      // IDs do Chatwoot
+      account_id: normalizedMessage.account_id.toString(),
+      inbox_id: normalizedMessage.inbox_id.toString(),
+      
+      // Timestamp
+      timestamp: normalizedMessage.message.timestamp || new Date().toISOString(),
+    };
+  }
   async handleMessage(
     normalizedMessage: NormalizedChatwootMessage,
     inbox: Inbox
   ): Promise<void> {
-    const tenant = await TenantModel.findById(inbox.tenant_id);
+    // Busca tenant do cache (rápido)
+    const tenant = await CacheService.getTenant(inbox.tenant_id);
     if (!tenant) {
       throw new Error(`Tenant ${inbox.tenant_id} não encontrado`);
     }
@@ -32,7 +71,7 @@ export class MessageHandler {
     const conversationId = parseInt(message.chat_id);
     const phoneNumber = message.remotejid;
     const messageText = message.content?.trim() || '';
-    const hasAttachments = attachments && attachments.length > 0;
+    const hasAttachments = !!(attachments && attachments.length > 0);
 
     if (!messageText && !hasAttachments) {
       console.log('Mensagem sem conteúdo nem anexos, ignorando');
@@ -96,6 +135,19 @@ export class MessageHandler {
 
       const attachedFileUrls = attachments?.map((att) => att.data_url) || [];
 
+      // Log detalhado das informações enviadas para o Typebot
+      this.logTypebotRequest('continueChat', session.sessionId, {
+        message: messageText || '',
+        attachedFileUrls: attachedFileUrls.length > 0 ? attachedFileUrls : undefined,
+      }, {
+        normalizedMessage,
+        conversationId,
+        phoneNumber,
+        messageText,
+        hasAttachments: hasAttachments || false,
+        attachmentsCount: attachments?.length || 0,
+      });
+
       try {
         typebotResponse = await typebotClient.continueChat(
           session.sessionId,
@@ -133,30 +185,49 @@ export class MessageHandler {
         `Iniciando nova sessão Typebot (${inbox.typebot_public_id}) - iniciando do início do fluxo`
       );
 
-      // Inicia o chat sem mensagem para que o Typebot inicie do início do fluxo
-      // O Typebot vai mostrar a primeira mensagem e botões do fluxo
+      // Inicia o chat com mensagem e variáveis pré-preenchidas
+      // Formato simplificado: sempre envia message (string) e prefilledVariables
       const attachedFileUrls = attachments?.map((att) => att.data_url) || [];
       
-      // Se houver apenas anexos (sem texto), inclui os anexos no startChat
-      // Caso contrário, inicia vazio para pegar o início do fluxo
-      const startRequest: any = attachedFileUrls.length > 0 && !messageText
+      // Constrói variáveis pré-preenchidas do normalizador
+      const prefilledVariables = this.buildTypebotVariables(
+        normalizedMessage,
+        conversationId
+      );
+      
+      // Monta o request no formato simplificado
+      // Se houver anexos, usa formato de objeto para incluir attachedFileUrls
+      // Caso contrário, usa formato simples com message como string
+      const startRequest: TypebotStartChatRequest = attachedFileUrls.length > 0
         ? {
             message: {
               type: 'text',
-              text: '',
+              text: messageText || '',
               attachedFileUrls: attachedFileUrls,
             },
+            prefilledVariables,
           }
-        : {}; // Objeto vazio para iniciar do início do fluxo
+        : {
+            message: messageText || '', // String vazia se não houver texto
+            prefilledVariables,
+          };
 
-      console.log(`Iniciando chat com request:`, JSON.stringify(startRequest));
+      // Log detalhado das informações enviadas para o Typebot
+      this.logTypebotRequest('startChat', inbox.typebot_public_id, startRequest, {
+        normalizedMessage,
+        conversationId,
+        phoneNumber,
+        messageText,
+        hasAttachments: hasAttachments || false,
+        attachmentsCount: attachments?.length || 0,
+      });
 
       typebotResponse = await typebotClient.startChat(
         inbox.typebot_public_id,
         startRequest
       );
 
-      console.log(`[Webhook] Resposta do Typebot startChat:`, {
+      console.log(`[MessageHandler] Resposta do Typebot startChat:`, {
         sessionId: typebotResponse.sessionId,
         resultId: typebotResponse.resultId,
         hasMessages: !!typebotResponse.messages,
@@ -164,7 +235,7 @@ export class MessageHandler {
       });
 
       if (!typebotResponse.sessionId) {
-        console.error(`[Webhook] ❌ Typebot não retornou sessionId! Resposta completa:`, JSON.stringify(typebotResponse, null, 2));
+        console.error(`[MessageHandler] ❌ Typebot não retornou sessionId! Resposta completa:`, JSON.stringify(typebotResponse, null, 2));
         throw new Error('Typebot não retornou sessionId na resposta');
       }
 
@@ -186,13 +257,13 @@ export class MessageHandler {
       // Quando inicia uma nova sessão, mostra primeiro a resposta inicial do Typebot
       // A mensagem do usuário será processada na PRÓXIMA interação (quando ele enviar outra mensagem)
       // Isso evita o erro "Invalid message" quando o Typebot está esperando um clique de botão
-      console.log(`[Webhook] Nova sessão iniciada. Mostrando resposta inicial do Typebot primeiro.`);
-      console.log(`[Webhook] Mensagem do usuário "${messageText}" será processada na próxima interação.`);
+      console.log(`[MessageHandler] Nova sessão iniciada. Mostrando resposta inicial do Typebot primeiro.`);
+      console.log(`[MessageHandler] Mensagem do usuário "${messageText}" será processada na próxima interação.`);
     }
 
     // Atualiza a sessão apenas se tiver sessionId válido
     if (typebotResponse && typebotResponse.sessionId) {
-      console.log(`[Webhook] Atualizando sessão final com sessionId: ${typebotResponse.sessionId}`);
+      console.log(`[MessageHandler] Atualizando sessão final com sessionId: ${typebotResponse.sessionId}`);
       await SessionService.createOrUpdateSession(
         inbox.tenant_id,
         inbox.id, // Usa o ID interno do inbox
@@ -203,21 +274,24 @@ export class MessageHandler {
         name // Passa o nome do contato
       );
     } else {
-      console.error(`[Webhook] ❌ Não é possível atualizar sessão final:`, {
+      console.error(`[MessageHandler] ❌ Não é possível atualizar sessão final:`, {
         hasTypebotResponse: !!typebotResponse,
         sessionId: typebotResponse?.sessionId,
       });
     }
 
-    // Loga mensagem de entrada
+    // Logs assíncronos (não bloqueiam)
     if (dbSessionId) {
-      await LoggerService.logIncomingMessage(
-        dbSessionId,
-        messageText,
-        message.content_type,
-        message.message_id,
-        attachments
-      );
+      messageLogQueue.add('log-incoming', {
+        type: 'log-incoming',
+        data: {
+          sessionId: dbSessionId,
+          content: messageText,
+          contentType: message.content_type,
+          chatwootMessageId: message.message_id,
+          attachments,
+        },
+      });
     }
 
     // Transforma resposta do Typebot em mensagens WhatsApp
@@ -233,15 +307,15 @@ export class MessageHandler {
         whatsappClient
       );
 
-      // Cria nota privada no Chatwoot
-      await this.createChatwootPrivateNote(
+      // Notas do Chatwoot assíncronas (não bloqueiam)
+      chatwootNoteQueue.add('create-note', {
         tenant,
         inbox,
         conversationId,
-        whatsappMessage
-      );
+        whatsappMessage,
+      });
 
-      // Loga mensagem de saída
+      // Log assíncrono
       if (dbSessionId) {
         let content: string | null = null;
         
@@ -265,13 +339,16 @@ export class MessageHandler {
           }
         }
 
-        await LoggerService.logOutgoingMessage(
-          dbSessionId,
-          content,
-          whatsappMessage.type,
-          response.messages[0]?.id,
-          typebotResponse
-        );
+        messageLogQueue.add('log-outgoing', {
+          type: 'log-outgoing',
+          data: {
+            sessionId: dbSessionId,
+            content,
+            contentType: whatsappMessage.type,
+            whatsappMessageId: response.messages[0]?.id,
+            typebotResponse,
+          },
+        });
       }
 
       // Delay entre mensagens
@@ -491,6 +568,86 @@ export class MessageHandler {
       console.error('Erro ao criar nota privada no Chatwoot:', error);
       // Não lança erro para não interromper o fluxo principal
     }
+  }
+
+  /**
+   * Log detalhado e estruturado de todas as informações enviadas para o Typebot
+   */
+  private logTypebotRequest(
+    method: 'startChat' | 'continueChat',
+    identifier: string,
+    request: any,
+    context: {
+      normalizedMessage: NormalizedChatwootMessage;
+      conversationId: number;
+      phoneNumber: string;
+      messageText: string;
+      hasAttachments: boolean;
+      attachmentsCount: number;
+    }
+  ): void {
+    console.log('\n' + '='.repeat(80));
+    console.log(`📤 ENVIANDO DADOS PARA O TYPEBOT - ${method.toUpperCase()}`);
+    console.log('='.repeat(80));
+    
+    console.log(`\n🔹 Método: ${method}`);
+    console.log(`🔹 Identificador: ${identifier}`);
+    console.log(`🔹 URL Base: ${context.normalizedMessage.cw?.url || 'N/A'}`);
+    
+    console.log(`\n📋 CONTEXTO DA MENSAGEM:`);
+    console.log(`   • Nome do Contato: ${context.normalizedMessage.name || 'N/A'}`);
+    console.log(`   • Telefone: ${context.phoneNumber || 'N/A'}`);
+    console.log(`   • ID da Conversa: ${context.conversationId}`);
+    console.log(`   • ID da Mensagem: ${context.normalizedMessage.message.message_id || 'N/A'}`);
+    console.log(`   • Texto da Mensagem: ${context.messageText || '(vazio)'}`);
+    console.log(`   • Tem Anexos: ${context.hasAttachments ? 'Sim' : 'Não'}`);
+    console.log(`   • Quantidade de Anexos: ${context.attachmentsCount}`);
+    
+    if (context.hasAttachments && context.normalizedMessage.attachments) {
+      console.log(`\n📎 ANEXOS:`);
+      context.normalizedMessage.attachments.forEach((att, index) => {
+        console.log(`   ${index + 1}. ID: ${att.id}, Tipo: ${att.file_type}, Tamanho: ${att.file_size || 'N/A'} bytes`);
+        console.log(`      URL: ${att.data_url}`);
+      });
+    }
+    
+    console.log(`\n📦 PAYLOAD ENVIADO PARA O TYPEBOT:`);
+    console.log(JSON.stringify(request, null, 2));
+    
+    if (request.prefilledVariables) {
+      console.log(`\n🔧 VARIÁVEIS PRÉ-PREENCHIDAS (disponíveis no Typebot):`);
+      Object.entries(request.prefilledVariables).forEach(([key, value]) => {
+        console.log(`   • {{${key}}}: ${value}`);
+      });
+    }
+    
+    if (request.message) {
+      console.log(`\n💬 MENSAGEM ENVIADA:`);
+      // message pode ser string ou objeto
+      if (typeof request.message === 'string') {
+        console.log(`   • Formato: String simples`);
+        console.log(`   • Texto: ${request.message || '(vazio)'}`);
+      } else {
+        console.log(`   • Formato: Objeto`);
+        console.log(`   • Tipo: ${request.message.type || 'N/A'}`);
+        console.log(`   • Texto: ${request.message.text || '(vazio)'}`);
+        if (request.message.attachedFileUrls && request.message.attachedFileUrls.length > 0) {
+          console.log(`   • URLs de Anexos: ${request.message.attachedFileUrls.length}`);
+          request.message.attachedFileUrls.forEach((url: string, index: number) => {
+            console.log(`     ${index + 1}. ${url}`);
+          });
+        }
+      }
+    }
+    
+    console.log(`\n📊 DADOS DO CHATWOOT:`);
+    console.log(`   • Account ID: ${context.normalizedMessage.account_id}`);
+    console.log(`   • Inbox ID: ${context.normalizedMessage.inbox_id}`);
+    console.log(`   • Chat ID: ${context.normalizedMessage.message.chat_id}`);
+    console.log(`   • Content Type: ${context.normalizedMessage.message.content_type || 'N/A'}`);
+    console.log(`   • Timestamp: ${context.normalizedMessage.message.timestamp || 'N/A'}`);
+    
+    console.log('\n' + '='.repeat(80) + '\n');
   }
 
   private delay(ms: number): Promise<void> {

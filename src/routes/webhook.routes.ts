@@ -1,33 +1,24 @@
 import { Router, Request, Response } from 'express';
 import { ChatwootRawWebhook } from '../types/chatwoot';
 import { ChatwootNormalizer } from '../normalizers/chatwoot-normalizer';
-import { InboxService } from '../services/inbox.service';
-import { MessageHandler } from '../handlers/message.handler';
+import { webhookQueue } from '../config/queue.config';
 import { SessionService } from '../services/session.service';
+import { CacheService } from '../services/cache.service';
+import { LockService } from '../services/lock.service';
 
 const router = Router();
-const messageHandler = new MessageHandler();
 
 router.post('/chatwoot', async (req: Request, res: Response) => {
+  const startTime = Date.now();
+  
   try {
-    // Log completo do payload recebido
-    console.log('[Webhook] ========== PAYLOAD RECEBIDO ==========');
-    console.log('[Webhook] req.body completo:', JSON.stringify(req.body, null, 2));
-    console.log('[Webhook] Tipo de req.body:', typeof req.body);
-    console.log('[Webhook] Chaves de req.body:', Object.keys(req.body || {}));
-    console.log('[Webhook] req.body.body existe?', !!req.body?.body);
-    console.log('[Webhook] req.body.event existe?', !!req.body?.event);
-    
-    // Normaliza o payload: Chatwoot pode enviar com wrapper { body: {...} } ou diretamente
+    // Validação rápida (sem logs excessivos em produção)
+    // Log apenas para debug - remover em produção para performance
     let rawWebhook: ChatwootRawWebhook;
     
     if (req.body.body && typeof req.body.body === 'object') {
-      // Payload com wrapper (estrutura esperada)
-      console.log('[Webhook] Usando payload com wrapper');
       rawWebhook = req.body as ChatwootRawWebhook;
     } else if (req.body.event) {
-      // Payload direto (sem wrapper) - normaliza para estrutura esperada
-      console.log('[Webhook] Usando payload direto, normalizando...');
       rawWebhook = {
         headers: req.headers as Record<string, string>,
         params: {},
@@ -37,27 +28,13 @@ router.post('/chatwoot', async (req: Request, res: Response) => {
         executionMode: req.body.executionMode,
       };
     } else {
-      console.error('[Webhook] ❌ Estrutura de payload desconhecida!');
-      console.error('[Webhook] req.body:', JSON.stringify(req.body, null, 2));
       return res.status(400).json({
         success: false,
         error: 'Estrutura de payload inválida',
-        received: req.body,
       });
     }
-    
-    console.log('[Webhook] Webhook normalizado:', {
-      event: rawWebhook.body?.event || 'unknown',
-      account_id: rawWebhook.body?.account?.id,
-      inbox_id: rawWebhook.body?.inbox_id,
-      hasMessages: !!rawWebhook.body?.messages,
-      messagesLength: rawWebhook.body?.messages?.length || 0,
-      bodyKeys: rawWebhook.body ? Object.keys(rawWebhook.body) : [],
-    });
-    console.log('[Webhook] ========================================');
 
     if (!ChatwootNormalizer.isValid(rawWebhook)) {
-      console.log('[Webhook] Webhook inválido ou mensagem de saída');
       return res.status(400).json({
         success: false,
         error: 'Webhook inválido ou mensagem de saída',
@@ -65,91 +42,87 @@ router.post('/chatwoot', async (req: Request, res: Response) => {
     }
 
     const event = ChatwootNormalizer.detectEvent(rawWebhook);
-    console.log('[Webhook] Evento detectado:', event.type);
-    console.log('[Webhook] Dados do evento:', JSON.stringify(event.data, null, 2));
 
     switch (event.type) {
       case 'message': {
         const normalizedMessage = event.data;
-        console.log('[Webhook] Processando mensagem:', {
-          account_id: normalizedMessage.account_id,
-          inbox_id: normalizedMessage.inbox_id,
-          content: normalizedMessage.message.content?.substring(0, 50),
-        });
         
-        const inbox = await InboxService.findByChatwootInboxId(
-          normalizedMessage.inbox_id
-        );
-
+        // Validação rápida: verifica se inbox existe (cache)
+        const inbox = await CacheService.getInbox(normalizedMessage.inbox_id);
         if (!inbox) {
-          console.log(`[Webhook] Inbox ${normalizedMessage.inbox_id} não encontrado`);
           return res.status(404).json({
             success: false,
             error: `Configuração não encontrada para inbox ${normalizedMessage.inbox_id}`,
           });
         }
+
+        // Cria jobId único baseado no message_id para evitar duplicatas
+        const jobId = `msg-${normalizedMessage.inbox_id}-${normalizedMessage.message.message_id}`;
         
-        console.log(`[Webhook] Inbox encontrado: ${inbox.inbox_name}`);
-
-        // Verifica se é resposta de botão ou texto livre
-        const buttonMapping = await SessionService.getButtonMapping(
-          normalizedMessage.account_id,
-          normalizedMessage.inbox_id,
-          parseInt(normalizedMessage.message.chat_id),
-          normalizedMessage.message.remotejid,
-          normalizedMessage.message.content || ''
-        );
-
-        if (buttonMapping) {
-          // É resposta de botão
-          await messageHandler.handleButtonResponse(
-            normalizedMessage.account_id,
-            normalizedMessage.inbox_id,
-            parseInt(normalizedMessage.message.chat_id),
-            normalizedMessage.message.remotejid,
-            normalizedMessage.message.content || '',
-            inbox
-          );
-        } else {
-          // É mensagem de texto normal
-          await messageHandler.handleMessage(normalizedMessage, inbox);
+        // Lock na criação do job para evitar que múltiplas réplicas criem o mesmo job
+        // TTL curto (5s padrão) pois a criação do job é muito rápida
+        const lockKey = `job-create-${normalizedMessage.inbox_id}-${normalizedMessage.message.message_id}`;
+        const lockTtl = parseInt(process.env.WEBHOOK_JOB_CREATE_LOCK_TTL || '5000', 10);
+        const lock = await LockService.acquireLock(lockKey, lockTtl);
+        
+        if (!lock) {
+          // Outra réplica já está criando este job, retorna sucesso
+          const responseTime = Date.now() - startTime;
+          console.log(`[WebhookAPI] ⚠️ Job ${jobId} já está sendo criado por outra réplica (response: ${responseTime}ms)`);
+          return res.status(200).json({
+            success: true,
+            event: 'already_queued',
+            queued_at: new Date().toISOString(),
+            response_time_ms: responseTime,
+          });
         }
 
-        res.status(200).json({
-          success: true,
-          event: 'message_processed',
-        });
-        break;
+        try {
+          // Adiciona job na fila de ALTA PRIORIDADE e responde imediatamente
+          // Se jobId já existe, não cria duplicata (comportamento padrão do BullMQ)
+          await webhookQueue.add(
+            'process-message',
+            { normalizedMessage },
+            {
+              priority: 1, // Prioridade máxima
+              jobId, // JobId único evita duplicatas
+              removeOnComplete: true,
+            }
+          );
+
+          // Resposta IMEDIATA ao Chatwoot (<50ms)
+          const responseTime = Date.now() - startTime;
+          console.log(`[WebhookAPI] ✅ Job criado: ${jobId} (response: ${responseTime}ms)`);
+          return res.status(200).json({
+            success: true,
+            event: 'message_queued',
+            queued_at: new Date().toISOString(),
+            response_time_ms: responseTime,
+          });
+        } finally {
+          // Libera o lock após criar o job
+          await LockService.releaseLock(lock);
+        }
       }
 
       case 'conversation_resolved': {
-        console.log(`[Webhook] ✅ Entrando no case conversation_resolved`);
         const { accountId, inboxId, conversationId } = event.data;
-
-        console.log(`[Webhook] Encerrando sessão - Account: ${accountId}, Inbox: ${inboxId}, Conversation: ${conversationId}`);
-
-        // Busca o inbox para obter o tenant_id correto
-        const inbox = await InboxService.findByChatwootInboxId(inboxId);
+        const inbox = await CacheService.getInbox(inboxId);
+        
         if (!inbox) {
-          console.log(`[Webhook] ❌ Inbox ${inboxId} não encontrado para fechar sessão`);
           return res.status(404).json({
             success: false,
             error: `Inbox ${inboxId} não encontrado`,
           });
         }
 
-        console.log(`[Webhook] ✅ Inbox encontrado: ${inbox.inbox_name}, Tenant ID: ${inbox.tenant_id}`);
-        console.log(`[Webhook] Fechando sessão no banco de dados e Redis...`);
-
+        // Processa fechamento de sessão (rápido, pode ser síncrono)
         await SessionService.closeSession(inbox.tenant_id, inbox.id, conversationId);
 
-        console.log(`[Webhook] ✅ Sessão encerrada com sucesso`);
-
-        res.status(200).json({
+        return res.status(200).json({
           success: true,
           event: 'conversation_closed',
         });
-        break;
       }
 
       case 'conversation_updated': {

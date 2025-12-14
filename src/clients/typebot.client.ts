@@ -28,9 +28,17 @@ export class TypebotClient {
     request: TypebotStartChatRequest = {}
   ): Promise<TypebotResponse> {
     try {
-      console.log(`[TypebotClient] Iniciando chat - Public ID: ${publicId}, Request:`, JSON.stringify(request, null, 2));
+      const endpoint = `/api/v1/typebots/${publicId}/startChat`;
+      const fullUrl = `${this.baseUrl}${endpoint}`;
+      
+      console.log(`\n🌐 [TypebotClient] Requisição HTTP para o Typebot:`);
+      console.log(`   • Método: POST`);
+      console.log(`   • URL: ${fullUrl}`);
+      console.log(`   • Public ID: ${publicId}`);
+      console.log(`   • Payload:`, JSON.stringify(request, null, 2));
+      
       const response = await this.client.post<TypebotResponse | TypebotResponse[]>(
-        `/api/v1/typebots/${publicId}/startChat`,
+        endpoint,
         request
       );
       
@@ -79,9 +87,24 @@ export class TypebotClient {
           }
         : { message };
 
-      console.log(`[TypebotClient] Continuando chat - Session ID: ${sessionId}, Message: ${message}`);
+      const endpoint = `/api/v1/sessions/${sessionId}/continueChat`;
+      const fullUrl = `${this.baseUrl}${endpoint}`;
+      
+      console.log(`\n🌐 [TypebotClient] Requisição HTTP para o Typebot:`);
+      console.log(`   • Método: POST`);
+      console.log(`   • URL: ${fullUrl}`);
+      console.log(`   • Session ID: ${sessionId}`);
+      console.log(`   • Mensagem: ${message || '(vazio)'}`);
+      if (attachedFileUrls && attachedFileUrls.length > 0) {
+        console.log(`   • Anexos: ${attachedFileUrls.length} arquivo(s)`);
+        attachedFileUrls.forEach((url, index) => {
+          console.log(`     ${index + 1}. ${url}`);
+        });
+      }
+      console.log(`   • Payload:`, JSON.stringify(body, null, 2));
+      
       const response = await this.client.post<TypebotResponse | TypebotResponse[]>(
-        `/api/v1/sessions/${sessionId}/continueChat`,
+        endpoint,
         body
       );
       

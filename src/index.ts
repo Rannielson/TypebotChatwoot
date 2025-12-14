@@ -9,7 +9,6 @@ import authRoutes from './routes/auth.routes';
 import tenantRoutes from './routes/tenant.routes';
 import inboxRoutes from './routes/inbox.routes';
 import sessionRoutes from './routes/session.routes';
-import webhookRoutes from './routes/webhook.routes';
 import healthRoutes from './routes/health.routes';
 
 // Middleware
@@ -49,7 +48,6 @@ app.use('/api/auth', authRoutes);
 app.use('/api/tenants', tenantRoutes);
 app.use('/api/inboxes', inboxRoutes);
 app.use('/api/sessions', sessionRoutes);
-app.use('/webhook', webhookRoutes);
 app.use('/health', healthRoutes);
 
 // Error handling
@@ -70,8 +68,7 @@ async function start() {
     // Inicia servidor
     app.listen(env.port, () => {
       logger.info(`Server started on port ${env.port}`);
-      console.log(`🚀 Servidor rodando na porta ${env.port}`);
-      console.log(`📡 Webhook Chatwoot: http://localhost:${env.port}/webhook/chatwoot`);
+      console.log(`🚀 API Server rodando na porta ${env.port}`);
       console.log(`🔐 API Auth: http://localhost:${env.port}/api/auth`);
       console.log(`🏢 API Tenants: http://localhost:${env.port}/api/tenants`);
       console.log(`📬 API Inboxes: http://localhost:${env.port}/api/inboxes`);

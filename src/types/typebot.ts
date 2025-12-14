@@ -1,6 +1,7 @@
 export interface TypebotStartChatRequest {
   resultId?: string;
-  message?: {
+  // Aceita message como string simples ou objeto completo (para anexos)
+  message?: string | {
     type: 'text';
     text: string;
     metadata?: {
