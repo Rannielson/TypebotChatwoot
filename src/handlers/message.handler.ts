@@ -78,6 +78,50 @@ export class MessageHandler {
       return;
     }
 
+    // Verifica se a sessão está pausada antes de processar
+    const pausedSession = await SessionModel.findByStatus(
+      inbox.tenant_id,
+      inbox.id,
+      conversationId,
+      phoneNumber,
+      'paused'
+    );
+
+    if (pausedSession) {
+      // Se a sessão está pausada, tenta retomar automaticamente
+      // Isso corrige casos onde team/assignee foi removido mas a sessão ainda está pausada
+      console.log(
+        `[MessageHandler] ⏸️ Sessão pausada detectada para ${name} (${phoneNumber}). ` +
+        `Conversation: ${conversationId}, Inbox: ${inbox_id}, SessionId: ${pausedSession.id}`
+      );
+      console.log(
+        `[MessageHandler] 🔄 Tentando retomar sessão automaticamente (team/assignee pode ter sido removido)...`
+      );
+
+      // Retoma a sessão automaticamente
+      const resumedCount = await SessionService.resumeSessionByConversation(
+        inbox.tenant_id,
+        inbox.id,
+        conversationId
+      );
+
+      if (resumedCount > 0) {
+        console.log(
+          `[MessageHandler] ✅ Sessão retomada automaticamente (${resumedCount} sessões). ` +
+          `Processando mensagem normalmente.`
+        );
+        // Continua o processamento da mensagem normalmente
+      } else {
+        // Se não conseguiu retomar, pode ser que realmente deva estar pausada
+        // Nesse caso, ignora a mensagem
+        console.log(
+          `[MessageHandler] ⚠️ Não foi possível retomar sessão. ` +
+          `Mensagem será ignorada. Verifique se team/assignee ainda está atribuído.`
+        );
+        return; // Não processa mensagem quando sessão está pausada
+      }
+    }
+
     console.log(
       `[Account: ${account_id}, Inbox: ${inbox_id}] Processando mensagem de ${name} (${phoneNumber}): ${messageText || 'com anexos'}`
     );

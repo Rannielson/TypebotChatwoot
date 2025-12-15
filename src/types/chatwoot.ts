@@ -12,6 +12,7 @@ export interface ChatwootRawWebhook {
       id: number;
       inbox_id: number;
       status?: string;
+      assignee_id?: number | null;
       contact_inbox?: {
         source_id: string;
       };
@@ -56,8 +57,12 @@ export interface ChatwootRawWebhook {
       sender?: {
         name?: string;
       };
+      conversation?: {
+        assignee_id?: number | null;
+      };
     }>;
     status?: string;
+    assignee_id?: number | null;
     contact_inbox?: {
       source_id?: string;
     };
@@ -67,6 +72,14 @@ export interface ChatwootRawWebhook {
         identifier?: string;
         name?: string;
       };
+      team?: {
+        id: number;
+        name: string;
+      } | null;
+      assignee?: {
+        id: number;
+        name?: string;
+      } | null;
     };
   };
   webhookUrl?: string;
@@ -111,5 +124,12 @@ export interface ConversationResolvedData {
   inboxId: number;
   conversationId: number;
   status: string;
+}
+
+export interface PauseSessionData {
+  accountId: number;
+  inboxId: number;
+  conversationId: number;
+  phoneNumber: string;
 }
 

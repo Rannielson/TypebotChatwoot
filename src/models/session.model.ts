@@ -46,6 +46,24 @@ export class SessionModel {
     return result.rows[0] || null;
   }
 
+  static async findByStatus(
+    tenantId: number,
+    inboxId: number,
+    conversationId: number,
+    phoneNumber: string,
+    status: 'active' | 'paused' | 'closed' | 'expired'
+  ): Promise<SessionHistory | null> {
+    const result = await db.query(
+      `SELECT * FROM sessions_history 
+       WHERE tenant_id = $1 AND inbox_id = $2 
+       AND conversation_id = $3 AND phone_number = $4 
+       AND status = $5
+       ORDER BY created_at DESC LIMIT 1`,
+      [tenantId, inboxId, conversationId, phoneNumber, status]
+    );
+    return result.rows[0] || null;
+  }
+
   static async findById(id: number): Promise<SessionHistory | null> {
     const result = await db.query(
       'SELECT * FROM sessions_history WHERE id = $1',
@@ -169,7 +187,7 @@ export class SessionModel {
     const result = await db.query(
       `UPDATE sessions_history 
        SET status = 'closed', closed_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP
-       WHERE tenant_id = $1 AND inbox_id = $2 AND conversation_id = $3 AND status = 'active'
+       WHERE tenant_id = $1 AND inbox_id = $2 AND conversation_id = $3 AND status IN ('active', 'paused')
        RETURNING id`,
       [tenantId, inboxId, conversationId]
     );
@@ -218,6 +236,91 @@ export class SessionModel {
     }
   }
 
+  /**
+   * Busca sessões com filtros opcionais de status, tenant_id e inbox_id
+   */
+  static async findAllWithFilters(
+    filters: {
+      status?: 'active' | 'paused' | 'closed' | 'expired';
+      tenantId?: number;
+      inboxId?: number;
+    } = {}
+  ): Promise<SessionHistory[]> {
+    const { status, tenantId, inboxId } = filters;
+    const conditions: string[] = [];
+    const values: any[] = [];
+    let paramCount = 1;
+
+    if (status) {
+      conditions.push(`s.status = $${paramCount++}`);
+      values.push(status);
+    }
+
+    if (tenantId) {
+      conditions.push(`s.tenant_id = $${paramCount++}`);
+      values.push(tenantId);
+    }
+
+    if (inboxId) {
+      conditions.push(`s.inbox_id = $${paramCount++}`);
+      values.push(inboxId);
+    }
+
+    const whereClause = conditions.length > 0 
+      ? `WHERE ${conditions.join(' AND ')}`
+      : '';
+
+    const query = `
+      SELECT s.*, i.inbox_name 
+      FROM sessions_history s
+      LEFT JOIN inboxes i ON s.inbox_id = i.id
+      ${whereClause}
+      ORDER BY s.created_at DESC
+    `;
+
+    const result = await db.query(query, values);
+    return result.rows;
+  }
+
+  /**
+   * Conta sessões com filtros opcionais
+   */
+  static async countWithFilters(
+    filters: {
+      status?: 'active' | 'paused' | 'closed' | 'expired';
+      tenantId?: number;
+      inboxId?: number;
+    } = {}
+  ): Promise<number> {
+    const { status, tenantId, inboxId } = filters;
+    const conditions: string[] = [];
+    const values: any[] = [];
+    let paramCount = 1;
+
+    if (status) {
+      conditions.push(`status = $${paramCount++}`);
+      values.push(status);
+    }
+
+    if (tenantId) {
+      conditions.push(`tenant_id = $${paramCount++}`);
+      values.push(tenantId);
+    }
+
+    if (inboxId) {
+      conditions.push(`inbox_id = $${paramCount++}`);
+      values.push(inboxId);
+    }
+
+    const whereClause = conditions.length > 0 
+      ? `WHERE ${conditions.join(' AND ')}`
+      : '';
+
+    const query = `SELECT COUNT(*) as count FROM sessions_history ${whereClause}`;
+    const result = await db.query(query, values);
+    return parseInt(result.rows[0].count);
+  }
+
   static async pause(id: number): Promise<SessionHistory> {
     const result = await db.query(
       `UPDATE sessions_history 
@@ -230,6 +333,44 @@ export class SessionModel {
       throw new Error('Sessão não encontrada ou já não está ativa');
     }
     return result.rows[0];
+  }
+
+  static async pauseByConversation(
+    tenantId: number,
+    inboxId: number,
+    conversationId: number
+  ): Promise<number> {
+    const result = await db.query(
+      `UPDATE sessions_history 
+       SET status = 'paused', updated_at = CURRENT_TIMESTAMP
+       WHERE tenant_id = $1 AND inbox_id = $2 AND conversation_id = $3 AND status = 'active'
+       RETURNING id`,
+      [tenantId, inboxId, conversationId]
+    );
+    return result.rowCount || 0;
+  }
+
+  /**
+   * Retoma (ativa) todas as sessões pausadas de uma conversa.
+   * 
+   * @param tenantId ID do tenant
+   * @param inboxId ID interno do inbox
+   * @param conversationId ID da conversa no Chatwoot
+   * @returns Número de sessões retomadas
+   */
+  static async resumeByConversation(
+    tenantId: number,
+    inboxId: number,
+    conversationId: number
+  ): Promise<number> {
+    const result = await db.query(
+      `UPDATE sessions_history 
+       SET status = 'active', updated_at = CURRENT_TIMESTAMP
+       WHERE tenant_id = $1 AND inbox_id = $2 AND conversation_id = $3 AND status = 'paused'
+       RETURNING id`,
+      [tenantId, inboxId, conversationId]
+    );
+    return result.rowCount || 0;
   }
 
   static async close(id: number): Promise<SessionHistory> {

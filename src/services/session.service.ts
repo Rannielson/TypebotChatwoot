@@ -230,5 +230,73 @@ export class SessionService {
   ): Promise<SessionHistory[]> {
     return await SessionModel.findByConversation(tenantId, inboxId, conversationId);
   }
+
+  /**
+   * Pausa todas as sessões ativas de uma conversa.
+   * Remove/invalida o cache do Redis para essas sessões.
+   * 
+   * @param tenantId ID do tenant
+   * @param inboxId ID interno do inbox
+   * @param conversationId ID da conversa no Chatwoot
+   * @returns Número de sessões pausadas
+   */
+  static async pauseSessionByConversation(
+    tenantId: number,
+    inboxId: number,
+    conversationId: number
+  ): Promise<number> {
+    console.log(`[SessionService] Pausando sessões - Tenant: ${tenantId}, Inbox: ${inboxId}, Conversation: ${conversationId}`);
+    
+    // Pausa no banco de dados
+    const pausedCount = await SessionModel.pauseByConversation(tenantId, inboxId, conversationId);
+    console.log(`[SessionService] Sessões pausadas no banco: ${pausedCount}`);
+
+    // Remove/invalida cache do Redis (busca todas as sessões da conversa)
+    const pattern = `session:${tenantId}:${inboxId}:${conversationId}:*`;
+    const keys = await redis.keys(pattern);
+    console.log(`[SessionService] Chaves encontradas no Redis para invalidar: ${keys.length}`);
+
+    for (const key of keys) {
+      await redis.del(key);
+      console.log(`[SessionService] Chave removida do Redis: ${key}`);
+    }
+
+    console.log(`[SessionService] ✅ Sessões pausadas completamente (${pausedCount} sessões)`);
+    return pausedCount;
+  }
+
+  /**
+   * Retoma (ativa) todas as sessões pausadas de uma conversa.
+   * Remove/invalida o cache do Redis para essas sessões para forçar recarregamento.
+   * 
+   * @param tenantId ID do tenant
+   * @param inboxId ID interno do inbox
+   * @param conversationId ID da conversa no Chatwoot
+   * @returns Número de sessões retomadas
+   */
+  static async resumeSessionByConversation(
+    tenantId: number,
+    inboxId: number,
+    conversationId: number
+  ): Promise<number> {
+    console.log(`[SessionService] Retomando sessões - Tenant: ${tenantId}, Inbox: ${inboxId}, Conversation: ${conversationId}`);
+    
+    // Retoma no banco de dados
+    const resumedCount = await SessionModel.resumeByConversation(tenantId, inboxId, conversationId);
+    console.log(`[SessionService] Sessões retomadas no banco: ${resumedCount}`);
+
+    // Remove/invalida cache do Redis (busca todas as sessões da conversa)
+    const pattern = `session:${tenantId}:${inboxId}:${conversationId}:*`;
+    const keys = await redis.keys(pattern);
+    console.log(`[SessionService] Chaves encontradas no Redis para invalidar: ${keys.length}`);
+
+    for (const key of keys) {
+      await redis.del(key);
+      console.log(`[SessionService] Chave removida do Redis: ${key}`);
+    }
+
+    console.log(`[SessionService] ✅ Sessões retomadas completamente (${resumedCount} sessões)`);
+    return resumedCount;
+  }
 }
 

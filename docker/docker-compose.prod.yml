@@ -1,0 +1,200 @@
+version: "3.8"
+
+services:
+
+
+  ## --------------------------- API GERAL --------------------------- ##
+  # API para rotas administrativas (auth, tenants, inboxes, sessions)
+  typebot_connector_api:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
+    networks:
+      - minha_rede
+    command: node dist/index.js
+    environment:
+      NODE_ENV: production
+      PORT: 3000
+      POSTGRES_HOST: postgres
+      POSTGRES_PORT: 5432
+      POSTGRES_DB: connectoratomos
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: 6a31b0c912e754caf48d965c5cae3490
+      REDIS_HOST: keydb
+      REDIS_PORT: 6381
+      REDIS_PASSWORD: 
+      JWT_SECRET: 93ef200c1df5490c9606a2124240e790
+      JWT_EXPIRES_IN: 24h
+      CHATWOOT_DEFAULT_URL: https://chatconnect.cleoia.com.br
+      CHATWOOT_DEFAULT_TOKEN: 
+      FRONTEND_URL: https://connect.atomos.tech
+    volumes:
+      - connector_logs:/app/logs
+    deploy:
+      mode: replicated
+      replicas: 2
+      placement:
+        constraints:
+          - node.role == manager
+      resources:
+        limits:
+          cpus: "1"
+          memory: 1024M
+      restart_policy:
+        condition: on-failure
+        delay: 5s
+        max_attempts: 3
+      labels:
+        - io.portainer.accesscontrol.users=admin
+        - traefik.enable=true
+        - traefik.http.routers.typebot_connector_api.rule=Host(`apiconnect.atomos.tech`)
+        - traefik.http.routers.typebot_connector_api.entrypoints=websecure
+        - traefik.http.routers.typebot_connector_api.tls.certresolver=letsencryptresolver
+        - traefik.http.routers.typebot_connector_api.service=typebot_connector_api
+        - traefik.http.services.typebot_connector_api.loadbalancer.server.port=3000
+        - traefik.http.services.typebot_connector_api.loadbalancer.passHostHeader=true
+
+  ## --------------------------- WEBHOOK API --------------------------- ##
+  # API dedicada para receber webhooks (alta escalabilidade)
+  typebot_connector_webhook:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
+    networks:
+      - minha_rede
+    command: node dist/webhook-server.js
+    environment:
+      NODE_ENV: production
+      PORT: 3001
+      POSTGRES_HOST: postgres
+      POSTGRES_PORT: 5432
+      POSTGRES_DB: connectoratomos
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: 6a31b0c912e754caf48d965c5cae3490
+      REDIS_HOST: keydb
+      REDIS_PORT: 6381
+      REDIS_PASSWORD: 
+      CHATWOOT_DEFAULT_URL: https://chatconnect.cleoia.com.br
+      CHATWOOT_DEFAULT_TOKEN: 
+      WEBHOOK_JOB_CREATE_LOCK_TTL: 5000
+    volumes:
+      - connector_logs:/app/logs
+    deploy:
+      mode: replicated
+      replicas: 3
+      placement:
+        constraints:
+          - node.role == manager
+      resources:
+        limits:
+          cpus: "1"
+          memory: 1024M
+      restart_policy:
+        condition: on-failure
+        delay: 5s
+        max_attempts: 3
+      labels:
+        - io.portainer.accesscontrol.users=admin
+        - traefik.enable=true
+        - traefik.http.routers.typebot_connector_webhook.rule=Host(`connectwebhook.atomos.tech`)
+        - traefik.http.routers.typebot_connector_webhook.entrypoints=websecure
+        - traefik.http.routers.typebot_connector_webhook.tls.certresolver=letsencryptresolver
+        - traefik.http.routers.typebot_connector_webhook.service=typebot_connector_webhook
+        - traefik.http.services.typebot_connector_webhook.loadbalancer.server.port=3001
+        - traefik.http.services.typebot_connector_webhook.loadbalancer.passHostHeader=true
+        # Rate limiting para webhooks
+        - traefik.http.routers.typebot_connector_webhook.middlewares=webhook-ratelimit
+        - traefik.http.middlewares.webhook-ratelimit.ratelimit.average=100
+        - traefik.http.middlewares.webhook-ratelimit.ratelimit.burst=50
+
+  ## --------------------------- WORKERS --------------------------- ##
+  # Workers para processar jobs (webhook, log, chatwoot-note)
+  typebot_connector_worker:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
+    networks:
+      - minha_rede
+    command: node dist/workers/index.js
+    environment:
+      NODE_ENV: production
+      POSTGRES_HOST: postgres
+      POSTGRES_PORT: 5432
+      POSTGRES_DB: connectoratomos
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: 6a31b0c912e754caf48d965c5cae3490
+      REDIS_HOST: keydb
+      REDIS_PORT: 6381
+      REDIS_PASSWORD: 
+      CHATWOOT_DEFAULT_URL: https://chatconnect.cleoia.com.br
+      CHATWOOT_DEFAULT_TOKEN: 
+      WEBHOOK_WORKER_CONCURRENCY: 50
+      LOG_WORKER_CONCURRENCY: 20
+      CHATWOOT_NOTE_WORKER_CONCURRENCY: 20
+      WEBHOOK_LOCK_TTL: 60000
+    volumes:
+      - connector_logs:/app/logs
+    deploy:
+      mode: replicated
+      replicas: 2
+      placement:
+        constraints:
+          - node.role == manager
+      resources:
+        limits:
+          cpus: "2"
+          memory: 2048M
+      restart_policy:
+        condition: on-failure
+        delay: 5s
+        max_attempts: 3
+      labels:
+        - io.portainer.accesscontrol.users=admin
+        # Workers não expõem portas, apenas processam jobs
+
+  ## --------------------------- FRONTEND --------------------------- ##
+  # Frontend Next.js
+  typebot_connector_frontend:
+    build:
+      context: ../frontend
+      dockerfile: Dockerfile
+      target: runner-prod
+      args:
+        BUILD_ENV: production
+        NEXT_PUBLIC_API_URL: https://apiconnect.atomos.tech/api
+    networks:
+      - minha_rede
+    environment:
+      NODE_ENV: production
+      NEXT_PUBLIC_API_URL: https://apiconnect.atomos.tech/api
+    deploy:
+      mode: replicated
+      replicas: 2
+      placement:
+        constraints:
+          - node.role == manager
+      resources:
+        limits:
+          cpus: "1"
+          memory: 1024M
+      restart_policy:
+        condition: on-failure
+        delay: 5s
+        max_attempts: 3
+      labels:
+        - io.portainer.accesscontrol.users=admin
+        - traefik.enable=true
+        - traefik.http.routers.typebot_connector_frontend.rule=Host(`connect.atomos.tech`)
+        - traefik.http.routers.typebot_connector_frontend.entrypoints=websecure
+        - traefik.http.routers.typebot_connector_frontend.tls.certresolver=letsencryptresolver
+        - traefik.http.routers.typebot_connector_frontend.service=typebot_connector_frontend
+        - traefik.http.services.typebot_connector_frontend.loadbalancer.server.port=3001
+        - traefik.http.services.typebot_connector_frontend.loadbalancer.passHostHeader=true
+
+volumes:
+  connector_logs:
+
+networks:
+  minha_rede:
+    external: true
+    name: minha_rede

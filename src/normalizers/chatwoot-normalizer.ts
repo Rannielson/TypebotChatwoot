@@ -3,6 +3,7 @@ import {
   NormalizedChatwootMessage,
   ChatwootEvent,
   ConversationResolvedData,
+  PauseSessionData,
 } from '../types/chatwoot';
 import { env } from '../config/env';
 
@@ -203,6 +204,105 @@ export class ChatwootNormalizer {
     }
 
     return env.chatwoot.defaultUrl;
+  }
+
+  /**
+   * Verifica se a sessão deve ser pausada baseado na presença de team ou assignee_id.
+   * A pausa ocorre se QUALQUER UM dos campos estiver presente (lógica OU).
+   * 
+   * @param rawWebhook Webhook do Chatwoot
+   * @returns Dados para pausar a sessão ou null se não deve pausar
+   */
+  static shouldPauseSession(rawWebhook: ChatwootRawWebhook): PauseSessionData | null {
+    const { body } = rawWebhook;
+
+    // Verifica se há team atribuído (meta.team existe, não é null, e tem id válido)
+    const team = body.meta?.team;
+    const hasTeam = team !== null && team !== undefined && typeof team === 'object' && team.id != null && team.id > 0;
+
+    // Verifica se há assignee em meta (meta.assignee existe, não é null, e tem id válido)
+    const assignee = body.meta?.assignee;
+    const hasAssigneeInMeta = assignee !== null && assignee !== undefined && typeof assignee === 'object' && assignee.id != null && assignee.id > 0;
+
+    // Verifica se há assignee_id na conversa (messages[0].conversation.assignee_id é um número válido)
+    const assigneeIdInConversation = body.messages?.[0]?.conversation?.assignee_id;
+    const hasAssigneeInConversation = 
+      assigneeIdInConversation !== null && 
+      assigneeIdInConversation !== undefined && 
+      typeof assigneeIdInConversation === 'number' && 
+      assigneeIdInConversation > 0;
+
+    // Verifica se há assignee_id no body diretamente (é um número válido)
+    const assigneeIdInBody = body.assignee_id;
+    const hasAssigneeInBody = 
+      assigneeIdInBody !== null && 
+      assigneeIdInBody !== undefined && 
+      typeof assigneeIdInBody === 'number' && 
+      assigneeIdInBody > 0;
+
+    // Log para debug
+    console.log('[Normalizer] Verificando condições de pausa:', {
+      hasTeam,
+      hasAssigneeInMeta,
+      hasAssigneeInConversation,
+      hasAssigneeInBody,
+      teamValue: team,
+      assigneeValue: assignee,
+      assigneeIdInConversation,
+      assigneeIdInBody,
+    });
+
+    // Lógica OU: basta um dos campos estar presente para pausar
+    if (!hasTeam && !hasAssigneeInMeta && !hasAssigneeInConversation && !hasAssigneeInBody) {
+      return null;
+    }
+
+    // Extrai informações necessárias para pausar a sessão
+    const accountId =
+      body.messages?.[0]?.account_id ||
+      body.account?.id ||
+      (body.meta?.sender as any)?.account?.id ||
+      0;
+
+    const inboxId =
+      body.inbox_id ||
+      body.inbox?.id ||
+      body.conversation?.inbox_id ||
+      0;
+
+    const conversationId =
+      body.conversation?.id || body.id || 0;
+
+    const phoneNumber =
+      body.conversation?.contact_inbox?.source_id ||
+      body.contact_inbox?.source_id ||
+      body.meta?.sender?.phone_number ||
+      body.meta?.sender?.identifier?.replace('@s.whatsapp.net', '') ||
+      body.sender?.phone_number ||
+      body.sender?.identifier?.replace('@s.whatsapp.net', '') ||
+      '';
+
+    // Valida se tem dados mínimos necessários
+    if (!accountId || !inboxId || !conversationId || !phoneNumber) {
+      console.warn('[Normalizer] Dados insuficientes para pausar sessão:', {
+        accountId,
+        inboxId,
+        conversationId,
+        phoneNumber,
+        hasTeam,
+        hasAssigneeInMeta,
+        hasAssigneeInConversation,
+        hasAssigneeInBody,
+      });
+      return null;
+    }
+
+    return {
+      accountId,
+      inboxId,
+      conversationId,
+      phoneNumber: this.normalizePhoneNumber(phoneNumber),
+    };
   }
 }
 

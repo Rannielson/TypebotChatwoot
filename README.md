@@ -122,19 +122,26 @@ Authorization: Bearer {token}
 }
 ```
 
-**Nota:** O `chatwoot_api_token` é usado para criar notas privadas no Chatwoot quando mensagens são enviadas via WhatsApp. Se não fornecido, usa o token do tenant ou variável de ambiente.
+**📖 Para explicação detalhada de cada campo, consulte:** [CONFIGURACAO-INBOXES.md](./CONFIGURACAO-INBOXES.md)
 
 ### 4. Configurar Webhook no Chatwoot
 
-Configure o webhook no Chatwoot para apontar para:
+**🔗 URL do Webhook (copie e cole no Chatwoot):**
 
 ```
-POST http://seu-servidor:3000/webhook/chatwoot
+https://connectwebhook.atomos.tech/webhook/chatwoot
 ```
 
-Eventos suportados:
-- `automation_event.message_created`: Processa mensagens
-- `automation_event.conversation_updated`: Encerra sessões quando `status: "resolved"`
+**Como configurar:**
+1. Acesse Chatwoot → **Settings** → **Applications** → **Webhooks**
+2. Clique em **Add Webhook**
+3. Cole a URL acima no campo **Webhook URL**
+4. Selecione os eventos:
+   - ✅ `automation_event.message_created`: Processa mensagens
+   - ✅ `automation_event.conversation_updated`: Encerra sessões quando `status: "resolved"`
+5. Salve a configuração
+
+**📖 Para mais detalhes, consulte:** [CONFIGURACAO-INBOXES.md](./CONFIGURACAO-INBOXES.md)
 
 ## Endpoints
 

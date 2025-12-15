@@ -347,7 +347,7 @@ export function transformChoiceInputToButtons(
   ) || [];
   const hasTextMessages = textMessages.length > 0;
   const bodyText = hasTextMessages 
-    ? 'escolha uma opção' // Texto padrão quando já há mensagens de texto antes
+    ? 'Escolha uma opção:' // Texto padrão quando já há mensagens de texto antes
     : (textMessages.length > 0
         ? extractTextFromRichText(textMessages[textMessages.length - 1].content.richText)
         : 'Escolha uma opção:');

@@ -3,6 +3,7 @@ import { ChatwootRawWebhook } from '../types/chatwoot';
 import { ChatwootNormalizer } from '../normalizers/chatwoot-normalizer';
 import { webhookQueue } from '../config/queue.config';
 import { SessionService } from '../services/session.service';
+import { SessionModel } from '../models/session.model';
 import { CacheService } from '../services/cache.service';
 import { LockService } from '../services/lock.service';
 
@@ -54,6 +55,74 @@ router.post('/chatwoot', async (req: Request, res: Response) => {
             success: false,
             error: `Configuração não encontrada para inbox ${normalizedMessage.inbox_id}`,
           });
+        }
+
+        // Verifica se deve pausar a sessão (team ou assignee atribuído)
+        const pauseData = ChatwootNormalizer.shouldPauseSession(rawWebhook);
+        if (pauseData) {
+          console.log(`[WebhookAPI] ⏸️ Detectado team/assignee atribuído, verificando se precisa pausar sessão:`, {
+            accountId: pauseData.accountId,
+            inboxId: pauseData.inboxId,
+            conversationId: pauseData.conversationId,
+          });
+
+          // Verifica se já existe sessão pausada (evita pausar novamente)
+          const existingPausedSession = await SessionModel.findByStatus(
+            inbox.tenant_id,
+            inbox.id,
+            pauseData.conversationId,
+            pauseData.phoneNumber,
+            'paused'
+          );
+
+          if (!existingPausedSession) {
+            // Pausa a sessão apenas se ainda não estiver pausada
+            const pausedCount = await SessionService.pauseSessionByConversation(
+              inbox.tenant_id,
+              inbox.id,
+              pauseData.conversationId
+            );
+            console.log(`[WebhookAPI] ✅ Sessão pausada (${pausedCount} sessões pausadas)`);
+          } else {
+            console.log(`[WebhookAPI] ℹ️ Sessão já estava pausada, mantendo status`);
+          }
+
+          // Não enfileira a mensagem - bot está pausado
+          const responseTime = Date.now() - startTime;
+          return res.status(200).json({
+            success: true,
+            event: 'session_paused',
+            message: 'Sessão pausada devido a team/assignee atribuído',
+            queued_at: new Date().toISOString(),
+            response_time_ms: responseTime,
+          });
+        } else {
+          // Não há condições de pausa, mas verifica se a sessão está pausada e precisa ser retomada
+          const conversationId = parseInt(normalizedMessage.message.chat_id);
+          const phoneNumber = normalizedMessage.message.remotejid;
+          
+          const pausedSession = await SessionModel.findByStatus(
+            inbox.tenant_id,
+            inbox.id,
+            conversationId,
+            phoneNumber,
+            'paused'
+          );
+
+          if (pausedSession) {
+            console.log(`[WebhookAPI] 🔄 Team/assignee removido, retomando sessão pausada:`, {
+              conversationId,
+              phoneNumber,
+              sessionId: pausedSession.id,
+            });
+
+            const resumedCount = await SessionService.resumeSessionByConversation(
+              inbox.tenant_id,
+              inbox.id,
+              conversationId
+            );
+            console.log(`[WebhookAPI] ✅ Sessão retomada (${resumedCount} sessões retomadas)`);
+          }
         }
 
         // Cria jobId único baseado no message_id para evitar duplicatas
@@ -126,11 +195,97 @@ router.post('/chatwoot', async (req: Request, res: Response) => {
       }
 
       case 'conversation_updated': {
-        res.status(200).json({
+        // Verifica se deve pausar a sessão (team ou assignee atribuído)
+        const pauseData = ChatwootNormalizer.shouldPauseSession(rawWebhook);
+        if (pauseData) {
+          console.log(`[WebhookAPI] ⏸️ conversation_updated: Detectado team/assignee atribuído, pausando sessão:`, {
+            accountId: pauseData.accountId,
+            inboxId: pauseData.inboxId,
+            conversationId: pauseData.conversationId,
+          });
+
+          // Busca inbox para obter tenant_id
+          const inbox = await CacheService.getInbox(pauseData.inboxId);
+          if (!inbox) {
+            console.warn(`[WebhookAPI] Inbox ${pauseData.inboxId} não encontrado para pausar sessão`);
+            return res.status(200).json({
+              success: true,
+              event: 'conversation_updated',
+              message: 'Inbox não encontrado',
+            });
+          }
+
+          // Pausa a sessão
+          await SessionService.pauseSessionByConversation(
+            inbox.tenant_id,
+            inbox.id,
+            pauseData.conversationId
+          );
+
+          return res.status(200).json({
+            success: true,
+            event: 'conversation_updated',
+            session_paused: true,
+            message: 'Sessão pausada devido a team/assignee atribuído',
+          });
+        } else {
+          // Não há condições de pausa, verifica se precisa retomar sessão pausada
+          // Extrai dados básicos do webhook para verificar sessão
+          const accountId =
+            rawWebhook.body.messages?.[0]?.account_id ||
+            rawWebhook.body.account?.id ||
+            (rawWebhook.body.meta?.sender as any)?.account?.id ||
+            0;
+          const inboxId =
+            rawWebhook.body.inbox_id ||
+            rawWebhook.body.inbox?.id ||
+            rawWebhook.body.conversation?.inbox_id ||
+            0;
+          const conversationId =
+            rawWebhook.body.conversation?.id || rawWebhook.body.id || 0;
+          const phoneNumber =
+            rawWebhook.body.conversation?.contact_inbox?.source_id ||
+            rawWebhook.body.contact_inbox?.source_id ||
+            rawWebhook.body.meta?.sender?.phone_number ||
+            rawWebhook.body.meta?.sender?.identifier?.replace('@s.whatsapp.net', '') ||
+            rawWebhook.body.sender?.phone_number ||
+            rawWebhook.body.sender?.identifier?.replace('@s.whatsapp.net', '') ||
+            '';
+
+          if (accountId && inboxId && conversationId && phoneNumber) {
+            const inbox = await CacheService.getInbox(inboxId);
+            if (inbox) {
+              const normalizedPhone = phoneNumber.replace(/[^\d]/g, '').replace('@s.whatsapp.net', '');
+              const pausedSession = await SessionModel.findByStatus(
+                inbox.tenant_id,
+                inbox.id,
+                conversationId,
+                normalizedPhone,
+                'paused'
+              );
+
+              if (pausedSession) {
+                console.log(`[WebhookAPI] 🔄 conversation_updated: Team/assignee removido, retomando sessão:`, {
+                  conversationId,
+                  phoneNumber: normalizedPhone,
+                  sessionId: pausedSession.id,
+                });
+
+                const resumedCount = await SessionService.resumeSessionByConversation(
+                  inbox.tenant_id,
+                  inbox.id,
+                  conversationId
+                );
+                console.log(`[WebhookAPI] ✅ Sessão retomada (${resumedCount} sessões retomadas)`);
+              }
+            }
+          }
+        }
+
+        return res.status(200).json({
           success: true,
           event: 'conversation_updated',
         });
-        break;
       }
 
       default:

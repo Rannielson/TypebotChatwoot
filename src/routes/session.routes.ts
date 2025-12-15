@@ -7,7 +7,46 @@ const router = Router();
 
 router.use(authMiddleware);
 
+// GET /api/sessions - Lista sessões com filtros opcionais (status, tenant_id, inbox_id)
+router.get('/', async (req: Request, res: Response) => {
+  try {
+    const status = req.query.status as 'active' | 'paused' | 'closed' | 'expired' | undefined;
+    const tenantId = req.query.tenant_id
+      ? parseInt(req.query.tenant_id as string)
+      : undefined;
+    const inboxId = req.query.inbox_id
+      ? parseInt(req.query.inbox_id as string)
+      : undefined;
+
+    // Valida status se fornecido
+    if (status && !['active', 'paused', 'closed', 'expired'].includes(status)) {
+      return res.status(400).json({ error: 'Status inválido. Use: active, paused, closed ou expired' });
+    }
+
+    const filters: {
+      status?: 'active' | 'paused' | 'closed' | 'expired';
+      tenantId?: number;
+      inboxId?: number;
+    } = {};
+
+    if (status) filters.status = status;
+    if (tenantId) filters.tenantId = tenantId;
+    if (inboxId) filters.inboxId = inboxId;
+
+    // Se nenhum filtro de status foi fornecido, usa 'active' como padrão
+    if (!status) {
+      filters.status = 'active';
+    }
+
+    const sessions = await SessionModel.findAllWithFilters(filters);
+    res.json(sessions);
+  } catch (error: any) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
 // GET /api/sessions/active - Lista todas as sessões ativas (opcional: filtrar por inbox_id)
+// Mantido para compatibilidade com código existente
 router.get('/active', async (req: Request, res: Response) => {
   try {
     const inboxId = req.query.inbox_id
@@ -21,15 +60,37 @@ router.get('/active', async (req: Request, res: Response) => {
   }
 });
 
-// GET /api/sessions/stats - Retorna estatísticas de sessões ativas
+// GET /api/sessions/stats - Retorna estatísticas de sessões
 router.get('/stats', async (req: Request, res: Response) => {
   try {
+    const status = req.query.status as 'active' | 'paused' | 'closed' | 'expired' | undefined;
+    const tenantId = req.query.tenant_id
+      ? parseInt(req.query.tenant_id as string)
+      : undefined;
     const inboxId = req.query.inbox_id
       ? parseInt(req.query.inbox_id as string)
       : undefined;
 
-    const count = await SessionModel.countActive(inboxId);
-    res.json({ activeSessions: count });
+    const filters: {
+      status?: 'active' | 'paused' | 'closed' | 'expired';
+      tenantId?: number;
+      inboxId?: number;
+    } = {};
+
+    if (status) filters.status = status;
+    if (tenantId) filters.tenantId = tenantId;
+    if (inboxId) filters.inboxId = inboxId;
+
+    // Se nenhum filtro de status foi fornecido, conta apenas ativas
+    if (!status) {
+      filters.status = 'active';
+    }
+
+    const count = await SessionModel.countWithFilters(filters);
+    res.json({ 
+      sessions: count,
+      activeSessions: count, // Mantido para compatibilidade
+    });
   } catch (error: any) {
     res.status(500).json({ error: error.message });
   }

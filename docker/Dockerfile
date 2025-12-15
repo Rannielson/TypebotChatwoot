@@ -25,9 +25,10 @@ RUN node -e "require('bcrypt')" || (rm -rf node_modules/bcrypt && npm install bc
 # Compila TypeScript (node_modules já está instalado e bcrypt já foi recompilado)
 RUN npm run build
 
-# Copia script de entrypoint
+# Copia scripts
 COPY docker/entrypoint.sh /entrypoint.sh
-RUN chmod +x /entrypoint.sh
+COPY docker/setup-db.sh /setup-db.sh
+RUN chmod +x /entrypoint.sh /setup-db.sh
 
 # Expõe porta
 EXPOSE 3000

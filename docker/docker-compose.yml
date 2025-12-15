@@ -167,7 +167,11 @@ services:
     build:
       context: ../frontend
       dockerfile: Dockerfile
+      target: ${FRONTEND_BUILD_TARGET:-runner-dev}
       args:
+        # Modo padrão: development (com Turbopack dev server e hot reload)
+        # Para produção, defina FRONTEND_BUILD_ENV=production e FRONTEND_BUILD_TARGET=runner-prod
+        BUILD_ENV: ${FRONTEND_BUILD_ENV:-development}
         # URL acessível do navegador (client-side)
         # IMPORTANTE: Esta URL é usada no navegador, então precisa ser acessível do host
         # Se o frontend roda dentro do Docker, use localhost:3000 (porta externa do nginx)
@@ -175,22 +179,37 @@ services:
         NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-http://localhost:3000/api}
     container_name: typebot_connector_frontend
     environment:
-      NODE_ENV: development
+      NODE_ENV: ${FRONTEND_NODE_ENV:-development}
       # URL acessível do navegador (NEXT_PUBLIC_* é exposto ao cliente)
       # IMPORTANTE: Esta variável é usada no código que roda no navegador
       # Não pode usar hostnames Docker internos (nginx, api, etc)
       # Deve usar localhost:3000 (porta externa do nginx) ou URL externa
       NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-http://localhost:3000/api}
+      # Configuração para hot reload com Turbopack
+      WATCHPACK_POLLING: ${WATCHPACK_POLLING:-true}
     ports:
       - "${FRONTEND_PORT:-3001}:3001"
+    volumes:
+      # Monta o código fonte para hot reload em tempo real
+      - ../frontend:/app
+      # Exclui node_modules e .next para evitar conflitos
+      - /app/node_modules
+      - /app/.next
     depends_on:
       - nginx
     restart: unless-stopped
     networks:
       - connector_network
-    # Nota: Se o frontend for acessado de fora do Docker (ex: navegador no host),
-    # NEXT_PUBLIC_API_URL deve ser http://localhost:3000/api
-    # Se usar tunnel cloudflare, use a URL do tunnel
+    # MODO DESENVOLVIMENTO (padrão):
+    #   - Hot reload automático com Turbopack
+    #   - Alterações no código refletem instantaneamente
+    #   - Volumes montados para sincronização em tempo real
+    # 
+    # MODO PRODUÇÃO (quando solicitado):
+    #   - Defina FRONTEND_BUILD_ENV=production no .env
+    #   - Defina FRONTEND_BUILD_TARGET=runner-prod no .env
+    #   - Defina FRONTEND_NODE_ENV=production no .env
+    #   - Build otimizado com Turbopack para máxima performance
 
   tunnel:
     image: cloudflare/cloudflared:latest

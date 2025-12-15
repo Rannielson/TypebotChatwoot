@@ -174,17 +174,55 @@ export default function InboxesPage() {
 
   return (
     <div className="space-y-8">
-      <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-3xl font-bold">Inboxes</h1>
-          <p className="text-muted-foreground">
-            Gerencie as caixas de entrada configuradas
-          </p>
+      <div className="space-y-4">
+        <div className="flex items-center justify-between">
+          <div>
+            <h1 className="text-3xl font-bold">Inboxes</h1>
+            <p className="text-muted-foreground">
+              Gerencie as caixas de entrada configuradas
+            </p>
+          </div>
+          <Button onClick={() => setShowForm(!showForm)} className="gap-2">
+            <RiAddLine className="h-4 w-4" />
+            {showForm ? "Cancelar" : "Novo Inbox"}
+          </Button>
         </div>
-        <Button onClick={() => setShowForm(!showForm)} className="gap-2">
-          <RiAddLine className="h-4 w-4" />
-          {showForm ? "Cancelar" : "Novo Inbox"}
-        </Button>
+
+        {/* URL do Webhook */}
+        <Card className="bg-blue-50 dark:bg-blue-950 border-blue-200 dark:border-blue-800">
+          <CardContent className="pt-6">
+            <div className="flex items-start justify-between gap-4">
+              <div className="flex-1">
+                <h3 className="font-semibold text-sm mb-1">🔗 URL do Webhook para Chatwoot</h3>
+                <p className="text-sm text-muted-foreground mb-2">
+                  Copie esta URL e configure no Chatwoot → Settings → Applications → Webhooks
+                </p>
+                <div className="flex items-center gap-2 bg-white dark:bg-gray-900 p-2 rounded border">
+                  <code className="text-sm flex-1 font-mono break-all">
+                    https://connectwebhook.atomos.tech/webhook/chatwoot
+                  </code>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    onClick={() => {
+                      navigator.clipboard.writeText(
+                        "https://connectwebhook.atomos.tech/webhook/chatwoot"
+                      );
+                      toast({
+                        title: "URL copiada!",
+                        description: "Cole no Chatwoot → Settings → Applications → Webhooks",
+                      });
+                    }}
+                    className="shrink-0"
+                  >
+                    Copiar
+                  </Button>
+                </div>
+              </div>
+            </div>
+          </CardContent>
+        </Card>
       </div>
 
       {showForm && (
@@ -201,7 +239,12 @@ export default function InboxesPage() {
             <form onSubmit={handleSubmit} className="space-y-4">
               <div className="grid gap-4 md:grid-cols-2">
                 <div className="space-y-2">
-                  <Label htmlFor="tenant_id">Tenant *</Label>
+                  <div>
+                    <Label htmlFor="tenant_id">Tenant *</Label>
+                    <p className="text-xs text-muted-foreground mt-0.5">
+                      Empresa/cliente ao qual este inbox pertence
+                    </p>
+                  </div>
                   <select
                     id="tenant_id"
                     className="flex h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-xs"
@@ -220,7 +263,12 @@ export default function InboxesPage() {
                   </select>
                 </div>
                 <div className="space-y-2">
-                  <Label htmlFor="inbox_id">ID do Inbox (Chatwoot) *</Label>
+                  <div>
+                    <Label htmlFor="inbox_id">ID do Inbox (Chatwoot) *</Label>
+                    <p className="text-xs text-muted-foreground mt-0.5">
+                      ID numérico do inbox no Chatwoot (encontre em Settings → Inboxes)
+                    </p>
+                  </div>
                   <Input
                     id="inbox_id"
                     type="number"
@@ -232,7 +280,12 @@ export default function InboxesPage() {
                   />
                 </div>
                 <div className="space-y-2">
-                  <Label htmlFor="inbox_name">Nome do Inbox *</Label>
+                  <div>
+                    <Label htmlFor="inbox_name">Nome do Inbox *</Label>
+                    <p className="text-xs text-muted-foreground mt-0.5">
+                      Nome descritivo para identificar o inbox (ex: "Atendimento Principal")
+                    </p>
+                  </div>
                   <Input
                     id="inbox_name"
                     value={formData.inbox_name}
@@ -243,8 +296,14 @@ export default function InboxesPage() {
                   />
                 </div>
                 <div className="space-y-2">
-                  <Label htmlFor="whatsapp_phone_number_id">
-                    WhatsApp Phone Number ID *</Label>
+                  <div>
+                    <Label htmlFor="whatsapp_phone_number_id">
+                      WhatsApp Phone Number ID *
+                    </Label>
+                    <p className="text-xs text-muted-foreground mt-0.5">
+                      ID do número no Meta for Developers (não é o número de telefone)
+                    </p>
+                  </div>
                   <Input
                     id="whatsapp_phone_number_id"
                     value={formData.whatsapp_phone_number_id}
@@ -258,8 +317,14 @@ export default function InboxesPage() {
                   />
                 </div>
                 <div className="space-y-2">
-                  <Label htmlFor="whatsapp_access_token">
-                    WhatsApp Access Token *</Label>
+                  <div>
+                    <Label htmlFor="whatsapp_access_token">
+                      WhatsApp Access Token *
+                    </Label>
+                    <p className="text-xs text-muted-foreground mt-0.5">
+                      Token permanente do WhatsApp Business API (Meta for Developers)
+                    </p>
+                  </div>
                   <Input
                     id="whatsapp_access_token"
                     type="password"
@@ -274,8 +339,14 @@ export default function InboxesPage() {
                   />
                 </div>
                 <div className="space-y-2">
-                  <Label htmlFor="whatsapp_api_version">
-                    WhatsApp API Version *</Label>
+                  <div>
+                    <Label htmlFor="whatsapp_api_version">
+                      WhatsApp API Version
+                    </Label>
+                    <p className="text-xs text-muted-foreground mt-0.5">
+                      Versão da API (padrão: v21.0)
+                    </p>
+                  </div>
                   <Input
                     id="whatsapp_api_version"
                     value={formData.whatsapp_api_version}
@@ -285,11 +356,15 @@ export default function InboxesPage() {
                         whatsapp_api_version: e.target.value,
                       })
                     }
-                    required
                   />
                 </div>
                 <div className="space-y-2">
-                  <Label htmlFor="typebot_base_url">URL Base do Typebot *</Label>
+                  <div>
+                    <Label htmlFor="typebot_base_url">URL Base do Typebot *</Label>
+                    <p className="text-xs text-muted-foreground mt-0.5">
+                      URL completa do Typebot Viewer (ex: https://assistenteatomos.cleoia.com.br)
+                    </p>
+                  </div>
                   <Input
                     id="typebot_base_url"
                     type="url"
@@ -304,7 +379,12 @@ export default function InboxesPage() {
                   />
                 </div>
                 <div className="space-y-2">
-                  <Label htmlFor="typebot_api_key">API Key do Typebot</Label>
+                  <div>
+                    <Label htmlFor="typebot_api_key">API Key do Typebot</Label>
+                    <p className="text-xs text-muted-foreground mt-0.5">
+                      Opcional: Necessário apenas se o Typebot requer autenticação
+                    </p>
+                  </div>
                   <Input
                     id="typebot_api_key"
                     type="password"
@@ -318,8 +398,14 @@ export default function InboxesPage() {
                   />
                 </div>
                 <div className="space-y-2">
-                  <Label htmlFor="typebot_public_id">
-                    Public ID do Typebot *</Label>
+                  <div>
+                    <Label htmlFor="typebot_public_id">
+                      Public ID do Typebot *
+                    </Label>
+                    <p className="text-xs text-muted-foreground mt-0.5">
+                      ID público do bot no Typebot (encontre em Settings → General)
+                    </p>
+                  </div>
                   <Input
                     id="typebot_public_id"
                     value={formData.typebot_public_id}
@@ -333,8 +419,14 @@ export default function InboxesPage() {
                   />
                 </div>
                 <div className="space-y-2">
-                  <Label htmlFor="chatwoot_api_token">
-                    Token da API do Chatwoot</Label>
+                  <div>
+                    <Label htmlFor="chatwoot_api_token">
+                      Token da API do Chatwoot
+                    </Label>
+                    <p className="text-xs text-muted-foreground mt-0.5">
+                      Opcional: Para criar notas privadas no Chatwoot (Settings → Applications → Access Tokens)
+                    </p>
+                  </div>
                   <Input
                     id="chatwoot_api_token"
                     type="password"
@@ -348,7 +440,12 @@ export default function InboxesPage() {
                   />
                 </div>
                 <div className="space-y-2">
-                  <Label htmlFor="is_active">Status</Label>
+                  <div>
+                    <Label htmlFor="is_active">Status</Label>
+                    <p className="text-xs text-muted-foreground mt-0.5">
+                      Ative/desative o processamento de mensagens deste inbox
+                    </p>
+                  </div>
                   <select
                     id="is_active"
                     className="flex h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-xs"

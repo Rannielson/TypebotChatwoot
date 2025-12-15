@@ -36,12 +36,64 @@ npm run dev
 
 A aplicação estará disponível em `http://localhost:3001` (ou outra porta disponível).
 
+**Nota:** O projeto utiliza **Turbopack** para desenvolvimento, proporcionando compilação até 10x mais rápida e hot reload instantâneo.
+
 ## Build
 
 ```bash
 npm run build
 npm start
 ```
+
+**Nota:** O build de produção utiliza **Turbopack** (`--turbo`), proporcionando builds significativamente mais rápidos (2x a 5x mais rápido que Webpack). O Next.js 16+ suporta Turbopack nativamente em desenvolvimento e produção.
+
+## Docker
+
+O projeto está configurado para **desenvolvimento por padrão** com hot reload automático.
+
+### Modo Desenvolvimento (Padrão - Hot Reload)
+
+Servidor de desenvolvimento com Turbopack e hot reload em tempo real:
+
+```bash
+# Valores padrão (não precisa configurar nada):
+# FRONTEND_BUILD_ENV=development
+# FRONTEND_BUILD_TARGET=runner-dev
+# FRONTEND_NODE_ENV=development
+
+cd docker
+docker-compose up -d frontend
+```
+
+**Características:**
+- 🔥 Hot reload automático - alterações refletem instantaneamente
+- 📁 Volumes montados para sincronização em tempo real
+- ⚡ Turbopack para máxima velocidade de compilação
+- 🐳 Funciona perfeitamente no Docker
+
+### Modo Produção (Quando Solicitado)
+
+Build otimizado com Turbopack para produção:
+
+```bash
+# No .env do docker-compose, defina:
+FRONTEND_BUILD_ENV=production
+FRONTEND_BUILD_TARGET=runner-prod
+FRONTEND_NODE_ENV=production
+
+# Rebuild a imagem
+cd docker
+docker-compose build frontend
+docker-compose up -d frontend
+```
+
+**Benefícios do Turbopack:**
+- ⚡ Build de produção 2x a 5x mais rápido que Webpack
+- 🔥 Hot reload instantâneo em desenvolvimento
+- 📦 Imagens Docker menores e mais eficientes (standalone)
+- 🚀 Performance otimizada em runtime
+- ✅ Compatibilidade total com PostCSS e Tailwind CSS
+- 🎯 Suporte nativo em Next.js 16+ para dev e produção
 
 ## Estrutura
 
