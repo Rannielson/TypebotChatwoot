@@ -7,10 +7,13 @@ import { ChatwootClient } from '../clients/chatwoot.client';
 import { TypebotClient } from '../clients/typebot.client';
 import { WhatsAppClient } from '../clients/whatsapp.client';
 import { transformTypebotResponseToWhatsApp } from '../transformers/typebot-to-whatsapp';
+import { formatWhatsAppMessageForChatwoot } from '../utils/message-formatter.util';
 import { messageLogQueue, chatwootNoteQueue } from '../config/queue.config';
 import { redis } from '../config/redis';
 import logger from '../utils/logger.util';
 import { TypebotResponse } from '../types/typebot';
+import { Tenant } from '../models/tenant.model';
+import { Inbox } from '../models/inbox.model';
 
 export class ConversationTriggerService {
   /**
@@ -169,7 +172,8 @@ export class ConversationTriggerService {
 
   /**
    * OTIMIZADO: Processa uma sessão para múltiplos triggers
-   * Faz UMA chamada GET da conversa e verifica todos os triggers
+   * Verifica triggers ANTES de buscar conversa (early exit)
+   * Faz UMA chamada GET da conversa apenas se houver triggers pendentes
    */
   private static async processSessionForMultipleTriggers(
     session: any,
@@ -177,7 +181,71 @@ export class ConversationTriggerService {
     tenant: any,
     triggers: any[]
   ): Promise<void> {
-    // Busca conversa UMA VEZ para todos os triggers
+    logger.debug(
+      `[ConversationTriggerService] Processando sessão ${session.id} ` +
+      `(conversa ${session.conversation_id}, ${triggers.length} trigger(s))`
+    );
+
+    // OTIMIZAÇÃO: Verifica triggers ANTES de buscar conversa (early exit)
+    // Usa batch queries para reduzir N queries para 2 queries (uma para execuções, uma para inbox_ids)
+    
+    const triggerIds = triggers.map(t => t.id);
+    
+    // Batch query 1: Verifica quais triggers já foram executados
+    const executedTriggers = await TriggerExecutionModel.hasBeenExecutedBatch(
+      session.conversation_id,
+      triggerIds,
+      session.typebot_session_id
+    );
+    
+    // Batch query 2: Busca inbox_ids de todos os triggers de uma vez
+    const triggerInboxMap = await TriggerModel.getInboxIdsForTriggersBatch(triggerIds);
+    
+    // Filtra apenas triggers que ainda não foram executados e estão associados ao inbox
+    const pendingTriggers: any[] = [];
+    
+    for (const trigger of triggers) {
+      try {
+        // Verifica se este trigger está associado a este inbox (usando resultado do batch)
+        const inboxIds = triggerInboxMap.get(trigger.id) || [];
+        if (!inboxIds.includes(inbox.id)) {
+          continue; // Pula se trigger não está associado a este inbox
+        }
+
+        // Verifica se este trigger JÁ FOI EXECUTADO (usando resultado do batch)
+        if (executedTriggers.has(trigger.id)) {
+          logger.debug(
+            `[ConversationTriggerService] Trigger ${trigger.id} (${trigger.name}) já foi executado ` +
+            `para conversa ${session.conversation_id} com sessão Typebot ${session.typebot_session_id}, pulando`
+          );
+          continue;
+        }
+
+        // Se chegou aqui, o trigger ainda não foi executado
+        pendingTriggers.push(trigger);
+      } catch (error: any) {
+        logger.error(
+          `[ConversationTriggerService] Erro ao processar trigger ${trigger.id}: ${error.message}`
+        );
+        // Continua com próximo trigger mesmo se houver erro
+      }
+    }
+
+    // Se não há triggers pendentes, não precisa buscar a conversa
+    if (pendingTriggers.length === 0) {
+      logger.debug(
+        `[ConversationTriggerService] Nenhum trigger pendente para sessão ${session.id} ` +
+        `(todos os ${triggers.length} trigger(s) já foram executados - sem chamada GET)`
+      );
+      return;
+    }
+
+    logger.debug(
+      `[ConversationTriggerService] ${pendingTriggers.length} trigger(s) pendente(s) de ${triggers.length} total ` +
+      `para sessão ${session.id} - buscando conversa`
+    );
+
+    // Busca conversa UMA VEZ apenas se houver triggers pendentes
     const chatwootUrl = tenant.chatwoot_url || process.env.CHATWOOT_DEFAULT_URL;
     const chatwootApiToken =
       inbox.chatwoot_api_token ||
@@ -192,32 +260,15 @@ export class ConversationTriggerService {
       return;
     }
 
-    console.log('\n' + '='.repeat(80));
-    console.log('🔍 [ConversationTriggerService] PROCESSANDO SESSÃO (OTIMIZADO)');
-    console.log('='.repeat(80));
-    console.log(`   • Session ID: ${session.id}`);
-    console.log(`   • Conversation ID: ${session.conversation_id}`);
-    console.log(`   • Typebot Session ID: ${session.typebot_session_id}`);
-    console.log(`   • Triggers a verificar: ${triggers.length} (mesma frequência)`);
-    console.log(`   • Inbox ID: ${inbox.id}`);
-    console.log('='.repeat(80) + '\n');
-
-    // Busca conversa UMA VEZ
     let conversation;
     try {
       const chatwootClient = new ChatwootClient(chatwootUrl, chatwootApiToken);
       conversation = await chatwootClient.getConversation(accountId, session.conversation_id);
       
-      console.log('\n' + '='.repeat(80));
-      console.log('✅ [ConversationTriggerService] CONVERSA BUSCADA COM SUCESSO (OTIMIZADO)');
-      console.log('='.repeat(80));
-      console.log(`   • Conversation ID: ${conversation.id}`);
-      console.log(`   • Status: ${conversation.status}`);
-      console.log(`   • Assignee ID: ${conversation.assignee_id || 'null'}`);
-      console.log(`   • Team ID: ${conversation.meta?.team?.id || 'null'}`);
-      console.log(`   • Last Activity At: ${conversation.last_activity_at}`);
-      console.log(`   • Esta conversa será verificada para ${triggers.length} trigger(s)`);
-      console.log('='.repeat(80) + '\n');
+      logger.debug(
+        `[ConversationTriggerService] Conversa ${conversation.id} buscada com sucesso ` +
+        `(status: ${conversation.status}, ${pendingTriggers.length} trigger(s) pendente(s))`
+      );
     } catch (error: any) {
       logger.error(
         `[ConversationTriggerService] Erro ao buscar conversa ${session.conversation_id}: ${error.message}`
@@ -225,15 +276,9 @@ export class ConversationTriggerService {
       return;
     }
 
-    // Verifica CADA trigger com os mesmos dados da conversa
-    for (const trigger of triggers) {
+    // Processa apenas os triggers pendentes com os mesmos dados da conversa
+    for (const trigger of pendingTriggers) {
       try {
-        // Verifica se este trigger está associado a este inbox
-        const inboxIds = await TriggerModel.getInboxIdsForTrigger(trigger.id);
-        if (!inboxIds.includes(inbox.id)) {
-          continue; // Pula se trigger não está associado a este inbox
-        }
-
         await this.processSessionWithConversation(
           session,
           inbox,
@@ -281,10 +326,11 @@ export class ConversationTriggerService {
       console.log(`   ❌ Trigger ${trigger.id} (${trigger.name}) JÁ FOI EXECUTADO`);
       console.log(`      Combinação: Conversa ${session.conversation_id} + Trigger ${trigger.id} + Typebot Session ${session.typebot_session_id}`);
       console.log(`      Cada combinação só pode executar UMA VEZ - pulando`);
+      console.log(`      ✅ Otimização: Nenhuma chamada GET será feita ao Chatwoot`);
       console.log('='.repeat(80) + '\n');
       logger.info(
         `[ConversationTriggerService] Trigger ${trigger.id} (${trigger.name}) já foi executado ` +
-        `para conversa ${session.conversation_id} com sessão Typebot ${session.typebot_session_id}, pulando`
+        `para conversa ${session.conversation_id} com sessão Typebot ${session.typebot_session_id}, pulando (sem chamada GET)`
       );
       return;
     }
@@ -682,18 +728,33 @@ export class ConversationTriggerService {
           await this.delay(delayToApply);
         }
 
-        const response = await this.sendWhatsAppMessage(
-          whatsappMessage,
-          whatsappClient
-        );
+        // IMPORTANTE: Mensagens de texto simples são enviadas APENAS pelo Chatwoot, não pela Meta API
+        // Isso evita duplicação de mensagens. Outros tipos (imagens, interativas) continuam pela Meta.
+        let response: any = null;
+        
+        if (whatsappMessage.type === 'text') {
+          console.log(
+            `[ConversationTriggerService] 📝 Mensagem de texto detectada. Enviando APENAS pelo Chatwoot (não pela Meta API)`
+          );
+          // Não envia pela Meta API para mensagens de texto
+          // A mensagem será enviada apenas pelo Chatwoot via queue abaixo
+          response = { messages: [{ id: 'chatwoot-only' }] }; // Placeholder para logs
+        } else {
+          // Outros tipos (imagens, interativas) continuam sendo enviados pela Meta API
+          response = await this.sendWhatsAppMessage(
+            whatsappMessage,
+            whatsappClient
+          );
+        }
 
-        // Notas do Chatwoot assíncronas (não bloqueiam)
-        chatwootNoteQueue.add('create-note', {
+        // Envia mensagem pelo Chatwoot (para texto: mensagem comum, para outros: nota privada)
+        // IMPORTANTE: Mensagens de texto são enviadas APENAS pelo Chatwoot
+        await this.createChatwootMessage(
           tenant,
           inbox,
           conversationId,
-          whatsappMessage,
-        });
+          whatsappMessage
+        );
 
         // Log assíncrono
         if (session.id) {
@@ -724,7 +785,7 @@ export class ConversationTriggerService {
               sessionId: session.id,
               content,
               contentType: whatsappMessage.type,
-              whatsappMessageId: response.messages[0]?.id,
+              whatsappMessageId: response?.messages?.[0]?.id || (whatsappMessage.type === 'text' ? 'chatwoot-only' : null),
               typebotResponse,
             },
           });
@@ -893,6 +954,62 @@ export class ConversationTriggerService {
     } catch (error: any) {
       console.error('Erro ao enviar mensagem WhatsApp:', error);
       throw error;
+    }
+  }
+
+  /**
+   * Cria mensagem no Chatwoot
+   * Mensagens de texto são enviadas como mensagem comum (não privada)
+   * Outros tipos são enviados como nota privada
+   */
+  private static async createChatwootMessage(
+    tenant: Tenant,
+    inbox: Inbox,
+    conversationId: number,
+    whatsappMessage: any
+  ): Promise<void> {
+    // Verifica se tem configuração do Chatwoot
+    const chatwootUrl = tenant.chatwoot_url || process.env.CHATWOOT_DEFAULT_URL;
+    const chatwootApiToken =
+      inbox.chatwoot_api_token ||
+      tenant.chatwoot_token ||
+      process.env.CHATWOOT_DEFAULT_TOKEN;
+    
+    // Account ID deve estar configurado no tenant (obrigatório por tenant)
+    const accountId = tenant.chatwoot_account_id;
+
+    if (!chatwootUrl || !chatwootApiToken) {
+      console.log(
+        '[ConversationTriggerService] Configuração do Chatwoot incompleta (URL ou token faltando), pulando criação de mensagem'
+      );
+      return;
+    }
+
+    if (!accountId) {
+      console.log(
+        `[ConversationTriggerService] Account ID do Chatwoot não configurado no tenant ${tenant.id}, pulando criação de mensagem`
+      );
+      return;
+    }
+
+    try {
+      const chatwootClient = new ChatwootClient(chatwootUrl, chatwootApiToken);
+      const noteContent = formatWhatsAppMessageForChatwoot(whatsappMessage);
+
+      // Lógica: apenas texto usa mensagem comum (private: false)
+      // Imagens, listas e botões usam nota privada (private: true)
+      const isPrivate = whatsappMessage.type !== 'text';
+
+      await chatwootClient.createMessage(
+        accountId,
+        conversationId,
+        noteContent,
+        isPrivate
+      );
+    } catch (error: any) {
+      const messageType = whatsappMessage.type === 'text' ? 'mensagem comum' : 'nota privada';
+      console.error(`[ConversationTriggerService] Erro ao criar ${messageType} no Chatwoot:`, error);
+      // Não lança erro para não interromper o fluxo principal
     }
   }
 

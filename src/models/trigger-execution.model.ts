@@ -120,6 +120,31 @@ export class TriggerExecutionModel {
   }
 
   /**
+   * OTIMIZADO: Verifica múltiplos triggers de uma vez (batch query)
+   * Retorna um Set com os trigger_ids que já foram executados
+   * Reduz N queries para 1 query única
+   */
+  static async hasBeenExecutedBatch(
+    conversationId: number,
+    triggerIds: number[],
+    typebotSessionId: string
+  ): Promise<Set<number>> {
+    if (triggerIds.length === 0) {
+      return new Set();
+    }
+
+    const result = await db.query(
+      `SELECT trigger_id FROM trigger_executions 
+       WHERE conversation_id = $1 
+       AND trigger_id = ANY($2::int[])
+       AND typebot_session_id = $3`,
+      [conversationId, triggerIds, typebotSessionId]
+    );
+    
+    return new Set(result.rows.map((row: any) => row.trigger_id));
+  }
+
+  /**
    * Remove execução (útil para testes ou reset)
    */
   static async delete(

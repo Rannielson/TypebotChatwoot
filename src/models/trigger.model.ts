@@ -140,4 +140,33 @@ export class TriggerModel {
     );
     return result.rows.map((row: any) => row.inbox_id);
   }
+
+  /**
+   * OTIMIZADO: Busca inbox_ids de múltiplos triggers de uma vez (batch query)
+   * Retorna um Map<triggerId, inboxIds[]>
+   * Reduz N queries para 1 query única
+   */
+  static async getInboxIdsForTriggersBatch(triggerIds: number[]): Promise<Map<number, number[]>> {
+    if (triggerIds.length === 0) {
+      return new Map();
+    }
+
+    const result = await db.query(
+      'SELECT trigger_id, inbox_id FROM inbox_triggers WHERE trigger_id = ANY($1::int[])',
+      [triggerIds]
+    );
+    
+    const map = new Map<number, number[]>();
+    for (const row of result.rows) {
+      const triggerId = row.trigger_id;
+      const inboxId = row.inbox_id;
+      
+      if (!map.has(triggerId)) {
+        map.set(triggerId, []);
+      }
+      map.get(triggerId)!.push(inboxId);
+    }
+    
+    return map;
+  }
 }
