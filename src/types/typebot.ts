@@ -77,6 +77,27 @@ export interface TypebotTextInput {
   prefilledValue?: string;
 }
 
+export interface TypebotWaitAction {
+  type: 'wait';
+  wait: {
+    event?: string;
+    timeout?: number; // em milissegundos
+    secondsToWaitFor?: number; // em segundos (formato mais comum)
+  };
+  lastBubbleBlockId?: string; // ID do último bloco de mensagem antes do wait
+}
+
+export interface TypebotClientSideAction {
+  type: string;
+  wait?: {
+    event?: string;
+    timeout?: number; // em milissegundos
+    secondsToWaitFor?: number; // em segundos (formato mais comum)
+  };
+  lastBubbleBlockId?: string; // ID do último bloco de mensagem antes do wait
+  [key: string]: any;
+}
+
 export interface TypebotResponse {
   sessionId: string;
   resultId?: string;
@@ -89,7 +110,7 @@ export interface TypebotResponse {
   };
   messages: TypebotMessage[];
   input?: TypebotChoiceInput | TypebotTextInput;
-  clientSideActions?: any[];
+  clientSideActions?: TypebotClientSideAction[];
   logs?: Array<{
     description: string;
     status?: string;

@@ -21,9 +21,19 @@ export const chatwootNoteWorker = new Worker(
     try {
       const chatwootClient = new ChatwootClient(chatwootUrl, chatwootApiToken);
       const noteContent = formatWhatsAppMessageForChatwoot(whatsappMessage);
-      await chatwootClient.createPrivateNote(accountId, conversationId, noteContent);
+      
+      // Lógica: apenas texto usa mensagem comum (private: false)
+      // Imagens, listas e botões usam nota privada (private: true)
+      const isPrivate = whatsappMessage.type !== 'text';
+      
+      await chatwootClient.createMessage(
+        accountId,
+        conversationId,
+        noteContent,
+        isPrivate
+      );
     } catch (error: any) {
-      console.error('[ChatwootNoteWorker] Erro ao criar nota:', error.message);
+      console.error('[ChatwootNoteWorker] Erro ao criar mensagem no Chatwoot:', error.message);
       // Não relança erro para não bloquear a fila
     }
   },

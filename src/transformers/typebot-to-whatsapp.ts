@@ -135,31 +135,44 @@ export function transformImageMessages(
 /**
  * Extrai header, body, footer e button text das mensagens de texto
  * Ordem esperada: header, body, footer, button text
+ * 
+ * Retorna também as mensagens que NÃO fazem parte dos componentes da lista
+ * (mensagens de grupos/blocos anteriores que devem ser enviadas separadamente)
  */
 function extractInteractiveListComponents(
   textMessages: TypebotTextMessage[]
 ): {
+  separateMessages: TypebotTextMessage[]; // Mensagens que devem ser enviadas separadamente
   header?: string;
   body: string;
   footer?: string;
   buttonText: string;
 } {
-  const header = textMessages.length >= 1 
-    ? extractTextFromRichText(textMessages[0].content.richText).trim() 
+  // Máximo de 4 mensagens podem ser usadas como componentes da lista
+  // (header, body, footer, button text)
+  // Qualquer mensagem anterior deve ser enviada separadamente
+  const maxComponentsForList = 4;
+  const messagesForList = textMessages.slice(-maxComponentsForList);
+  const separateMessages = textMessages.slice(0, -maxComponentsForList);
+
+  // Extrai componentes da lista das últimas mensagens
+  const header = messagesForList.length >= 1 
+    ? extractTextFromRichText(messagesForList[0].content.richText).trim() 
     : undefined;
-  const body = textMessages.length >= 2
-    ? extractTextFromRichText(textMessages[1].content.richText).trim()
-    : textMessages.length >= 1
-    ? extractTextFromRichText(textMessages[0].content.richText).trim()
+  const body = messagesForList.length >= 2
+    ? extractTextFromRichText(messagesForList[1].content.richText).trim()
+    : messagesForList.length >= 1
+    ? extractTextFromRichText(messagesForList[0].content.richText).trim()
     : 'Escolha uma opção:';
-  const footer = textMessages.length >= 3
-    ? extractTextFromRichText(textMessages[2].content.richText).trim()
+  const footer = messagesForList.length >= 3
+    ? extractTextFromRichText(messagesForList[2].content.richText).trim()
     : undefined;
-  const buttonText = textMessages.length >= 4
-    ? extractTextFromRichText(textMessages[3].content.richText).trim()
+  const buttonText = messagesForList.length >= 4
+    ? extractTextFromRichText(messagesForList[3].content.richText).trim()
     : 'Ver opções';
 
   return {
+    separateMessages,
     header: header || undefined,
     body: body || 'Escolha uma opção:',
     footer: footer || undefined,
@@ -193,16 +206,25 @@ function organizeItemsIntoSections(
 export function transformChoiceInputToList(
   typebotResponse: TypebotResponse,
   to: string
-): WhatsAppInteractiveListMessage | null {
+): {
+  listMessage: WhatsAppInteractiveListMessage | null;
+  separateTextMessages: WhatsAppTextMessage[];
+} {
   if (!typebotResponse.input || typebotResponse.input.type !== 'choice input') {
-    return null;
+    return {
+      listMessage: null,
+      separateTextMessages: [],
+    };
   }
 
   const choiceInput = typebotResponse.input as TypebotChoiceInput;
 
   // Só usa list se tiver mais de 3 itens
   if (choiceInput.items.length <= 3) {
-    return null;
+    return {
+      listMessage: null,
+      separateTextMessages: [],
+    };
   }
 
   // Log detalhado de todos os itens recebidos do Typebot
@@ -216,11 +238,19 @@ export function transformChoiceInputToList(
   });
 
   // Extrai header, body, footer e button text das mensagens
+  // Também identifica mensagens que devem ser enviadas separadamente
   const textMessages = typebotResponse.messages?.filter(
     (msg): msg is TypebotTextMessage => msg.type === 'text'
   ) || [];
   
-  const { header, body, footer, buttonText } = extractInteractiveListComponents(textMessages);
+  const { separateMessages, header, body, footer, buttonText } = extractInteractiveListComponents(textMessages);
+  
+  // Transforma mensagens separadas em mensagens WhatsApp
+  const separateTextMessages = transformTextMessages(separateMessages, to);
+  
+  if (separateMessages.length > 0) {
+    console.log(`[TypebotToWhatsApp] 📤 ${separateMessages.length} mensagem(ns) de texto serão enviadas separadamente antes da lista`);
+  }
 
   // Filtra itens que não têm displayCondition ou têm displayCondition habilitado
   // E também filtra itens sem outgoingEdgeId válido
@@ -250,10 +280,13 @@ export function transformChoiceInputToList(
 
   console.log(`[TypebotToWhatsApp] ${activeItems.length} itens ativos de ${choiceInput.items.length} totais`);
 
-  // Se não houver itens válidos, retorna null
+  // Se não houver itens válidos, retorna apenas as mensagens separadas
   if (activeItems.length === 0) {
     console.warn('[TypebotToWhatsApp] Nenhum item válido encontrado para lista interativa');
-    return null;
+    return {
+      listMessage: null,
+      separateTextMessages: separateTextMessages,
+    };
   }
 
   // Converte itens em rows
@@ -274,10 +307,13 @@ export function transformChoiceInputToList(
   console.log(`[TypebotToWhatsApp] Lista organizada em ${sections.length} seção(ões) com ${sections.reduce((sum, s) => sum + s.rows.length, 0)} item(ns) total`);
 
   if (sections.length === 0) {
-    return null;
+    return {
+      listMessage: null,
+      separateTextMessages: separateTextMessages,
+    };
   }
 
-  return {
+  const listMessage: WhatsAppInteractiveListMessage = {
     messaging_product: 'whatsapp',
     recipient_type: 'individual',
     to,
@@ -312,6 +348,11 @@ export function transformChoiceInputToList(
         })),
       },
     },
+  };
+
+  return {
+    listMessage,
+    separateTextMessages,
   };
 }
 
@@ -466,7 +507,14 @@ export function transformTypebotResponseToWhatsApp(
     
     // Se tiver mais de 3 itens, usa interactive list
     if (choiceInput.items.length > 3) {
-      const listMessage = transformChoiceInputToList(typebotResponse, to);
+      const { listMessage, separateTextMessages } = transformChoiceInputToList(typebotResponse, to);
+      
+      // Envia mensagens separadas primeiro (mensagens de grupos/blocos anteriores)
+      if (separateTextMessages.length > 0) {
+        whatsappMessages.push(...separateTextMessages);
+      }
+      
+      // Depois envia a lista interativa
       if (listMessage) {
         whatsappMessages.push(listMessage);
       }

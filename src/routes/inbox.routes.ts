@@ -1,5 +1,6 @@
 import { Router, Request, Response } from 'express';
 import { InboxService } from '../services/inbox.service';
+import { TriggerService } from '../services/trigger.service';
 import { authMiddleware } from '../middleware/auth.middleware';
 
 const router = Router();
@@ -19,6 +20,16 @@ router.get('/', async (req: Request, res: Response) => {
       const inboxes = await InboxService.findAll();
       res.json(inboxes);
     }
+  } catch (error: any) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Listar triggers de um inbox (deve vir antes de /:id)
+router.get('/:id/triggers', async (req: Request, res: Response) => {
+  try {
+    const triggers = await TriggerService.findByInboxId(parseInt(req.params.id));
+    res.json(triggers);
   } catch (error: any) {
     res.status(500).json({ error: error.message });
   }
@@ -47,6 +58,8 @@ router.post('/', async (req: Request, res: Response) => {
       typebot_public_id,
       chatwoot_api_token,
       is_active,
+      is_test_mode,
+      test_phone_number,
     } = req.body;
 
     if (
@@ -75,6 +88,8 @@ router.post('/', async (req: Request, res: Response) => {
       typebot_public_id,
       chatwoot_api_token,
       is_active,
+      is_test_mode,
+      test_phone_number,
     });
     res.status(201).json(inbox);
   } catch (error: any) {
@@ -94,6 +109,8 @@ router.put('/:id', async (req: Request, res: Response) => {
       typebot_public_id,
       chatwoot_api_token,
       is_active,
+      is_test_mode,
+      test_phone_number,
     } = req.body;
 
     const inbox = await InboxService.update(parseInt(req.params.id), {
@@ -106,6 +123,8 @@ router.put('/:id', async (req: Request, res: Response) => {
       typebot_public_id,
       chatwoot_api_token,
       is_active,
+      is_test_mode,
+      test_phone_number,
     });
     res.json(inbox);
   } catch (error: any) {

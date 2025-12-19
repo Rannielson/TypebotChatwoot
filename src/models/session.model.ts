@@ -11,6 +11,8 @@ export interface SessionHistory {
   typebot_result_id: string | null;
   typebot_public_id: string;
   status: 'active' | 'closed' | 'expired' | 'paused';
+  last_trigger_command: string | null;
+  last_triggered_at: Date | null;
   created_at: Date;
   updated_at: Date;
   closed_at: Date | null;
@@ -26,6 +28,8 @@ export interface CreateSessionData {
   typebot_result_id?: string;
   typebot_public_id: string;
   status?: 'active' | 'closed' | 'expired' | 'paused';
+  last_trigger_command?: string | null;
+  last_triggered_at?: Date | null;
 }
 
 export class SessionModel {
@@ -117,14 +121,17 @@ export class SessionModel {
     const result = await db.query(
       `INSERT INTO sessions_history (
         tenant_id, inbox_id, conversation_id, phone_number, contact_name,
-        typebot_session_id, typebot_result_id, typebot_public_id, status
-      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+        typebot_session_id, typebot_result_id, typebot_public_id, status,
+        last_trigger_command, last_triggered_at
+      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
       ON CONFLICT (tenant_id, inbox_id, conversation_id, phone_number, typebot_session_id)
       DO UPDATE SET 
         updated_at = CURRENT_TIMESTAMP,
         typebot_result_id = EXCLUDED.typebot_result_id,
         status = EXCLUDED.status,
-        contact_name = COALESCE(EXCLUDED.contact_name, sessions_history.contact_name)
+        contact_name = COALESCE(EXCLUDED.contact_name, sessions_history.contact_name),
+        last_trigger_command = COALESCE(EXCLUDED.last_trigger_command, sessions_history.last_trigger_command),
+        last_triggered_at = COALESCE(EXCLUDED.last_triggered_at, sessions_history.last_triggered_at)
       RETURNING *`,
       [
         data.tenant_id,
@@ -136,6 +143,8 @@ export class SessionModel {
         data.typebot_result_id || null,
         data.typebot_public_id,
         data.status || 'active',
+        data.last_trigger_command || null,
+        data.last_triggered_at || null,
       ]
     );
     return result.rows[0];
@@ -167,6 +176,14 @@ export class SessionModel {
     if (data.tenant_id !== undefined) {
       fields.push(`tenant_id = $${paramCount++}`);
       values.push(data.tenant_id);
+    }
+    if (data.last_trigger_command !== undefined) {
+      fields.push(`last_trigger_command = $${paramCount++}`);
+      values.push(data.last_trigger_command || null);
+    }
+    if (data.last_triggered_at !== undefined) {
+      fields.push(`last_triggered_at = $${paramCount++}`);
+      values.push(data.last_triggered_at || null);
     }
 
     fields.push(`updated_at = CURRENT_TIMESTAMP`);

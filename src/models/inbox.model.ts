@@ -13,6 +13,8 @@ export interface Inbox {
   typebot_public_id: string;
   chatwoot_api_token: string | null;
   is_active: boolean;
+  is_test_mode: boolean;
+  test_phone_number: string | null;
   created_at: Date;
   updated_at: Date;
 }
@@ -29,6 +31,8 @@ export interface CreateInboxData {
   typebot_public_id: string;
   chatwoot_api_token?: string;
   is_active?: boolean;
+  is_test_mode?: boolean;
+  test_phone_number?: string;
 }
 
 export class InboxModel {
@@ -74,8 +78,9 @@ export class InboxModel {
       `INSERT INTO inboxes (
         tenant_id, inbox_id, inbox_name, whatsapp_phone_number_id,
         whatsapp_access_token, whatsapp_api_version, typebot_base_url,
-        typebot_api_key, typebot_public_id, chatwoot_api_token, is_active
-      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11) RETURNING *`,
+        typebot_api_key, typebot_public_id, chatwoot_api_token, is_active,
+        is_test_mode, test_phone_number
+      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13) RETURNING *`,
       [
         data.tenant_id,
         data.inbox_id,
@@ -88,6 +93,8 @@ export class InboxModel {
         data.typebot_public_id,
         data.chatwoot_api_token || null,
         data.is_active !== undefined ? data.is_active : true,
+        data.is_test_mode !== undefined ? data.is_test_mode : false,
+        data.test_phone_number || null,
       ]
     );
     return result.rows[0];
@@ -136,6 +143,14 @@ export class InboxModel {
     if (data.is_active !== undefined) {
       fields.push(`is_active = $${paramCount++}`);
       values.push(data.is_active);
+    }
+    if (data.is_test_mode !== undefined) {
+      fields.push(`is_test_mode = $${paramCount++}`);
+      values.push(data.is_test_mode);
+    }
+    if (data.test_phone_number !== undefined) {
+      fields.push(`test_phone_number = $${paramCount++}`);
+      values.push(data.test_phone_number || null);
     }
 
     fields.push(`updated_at = CURRENT_TIMESTAMP`);

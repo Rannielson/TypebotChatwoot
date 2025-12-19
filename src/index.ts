@@ -9,6 +9,7 @@ import authRoutes from './routes/auth.routes';
 import tenantRoutes from './routes/tenant.routes';
 import inboxRoutes from './routes/inbox.routes';
 import sessionRoutes from './routes/session.routes';
+import triggerRoutes from './routes/trigger.routes';
 import healthRoutes from './routes/health.routes';
 
 // Middleware
@@ -48,6 +49,7 @@ app.use('/api/auth', authRoutes);
 app.use('/api/tenants', tenantRoutes);
 app.use('/api/inboxes', inboxRoutes);
 app.use('/api/sessions', sessionRoutes);
+app.use('/api/triggers', triggerRoutes);
 app.use('/health', healthRoutes);
 
 // Error handling
@@ -73,6 +75,7 @@ async function start() {
       console.log(`🏢 API Tenants: http://localhost:${env.port}/api/tenants`);
       console.log(`📬 API Inboxes: http://localhost:${env.port}/api/inboxes`);
       console.log(`💬 API Sessions: http://localhost:${env.port}/api/sessions`);
+      console.log(`⚡ API Triggers: http://localhost:${env.port}/api/triggers`);
       console.log(`❤️  Health Check: http://localhost:${env.port}/health`);
     });
   } catch (error) {

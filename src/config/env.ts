@@ -25,6 +25,9 @@ interface EnvConfig {
     defaultUrl: string;
     defaultToken?: string;
   };
+  openai: {
+    apiKey?: string;
+  };
 }
 
 function validateEnv(): EnvConfig {
@@ -67,6 +70,9 @@ function validateEnv(): EnvConfig {
     chatwoot: {
       defaultUrl: process.env.CHATWOOT_DEFAULT_URL || 'https://chatconnect.cleoia.com.br',
       defaultToken: process.env.CHATWOOT_DEFAULT_TOKEN,
+    },
+    openai: {
+      apiKey: process.env.OPENAI_API_KEY,
     },
   };
 }

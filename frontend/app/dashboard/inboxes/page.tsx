@@ -5,6 +5,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Switch } from "@/components/ui/switch";
 import { RiAddLine, RiEditLine, RiDeleteBinLine, RiInboxLine } from "@remixicon/react";
 import api from "@/lib/api";
 import { useToast } from "@/hooks/use-toast";
@@ -27,6 +28,8 @@ interface Inbox {
   typebot_public_id: string;
   chatwoot_api_token?: string;
   is_active: boolean;
+  is_test_mode?: boolean;
+  test_phone_number?: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -50,6 +53,8 @@ export default function InboxesPage() {
     typebot_public_id: "",
     chatwoot_api_token: "",
     is_active: "true",
+    is_test_mode: "false",
+    test_phone_number: "",
   });
 
   useEffect(() => {
@@ -90,6 +95,10 @@ export default function InboxesPage() {
         typebot_public_id: formData.typebot_public_id,
         chatwoot_api_token: formData.chatwoot_api_token || undefined,
         is_active: formData.is_active === "true",
+        is_test_mode: formData.is_test_mode === "true",
+        test_phone_number: formData.is_test_mode === "true" && formData.test_phone_number 
+          ? formData.test_phone_number.trim() 
+          : undefined,
       };
 
       if (editingInbox) {
@@ -132,6 +141,8 @@ export default function InboxesPage() {
       typebot_public_id: "",
       chatwoot_api_token: "",
       is_active: "true",
+      is_test_mode: "false",
+      test_phone_number: "",
     });
   };
 
@@ -149,6 +160,8 @@ export default function InboxesPage() {
       typebot_public_id: inbox.typebot_public_id,
       chatwoot_api_token: inbox.chatwoot_api_token || "",
       is_active: inbox.is_active.toString(),
+      is_test_mode: (inbox.is_test_mode ?? false).toString(),
+      test_phone_number: inbox.test_phone_number || "",
     });
     setShowForm(true);
   };
@@ -457,6 +470,50 @@ export default function InboxesPage() {
                     <option value="true">Ativo</option>
                     <option value="false">Inativo</option>
                   </select>
+                </div>
+                <div className="space-y-2">
+                  <div>
+                    <Label htmlFor="is_test_mode">Modo Teste</Label>
+                    <p className="text-xs text-muted-foreground mt-0.5">
+                      Quando ativado, processa apenas mensagens do telefone especificado. Ideal para validação antes de produção.
+                    </p>
+                  </div>
+                  <div className="flex items-center gap-3">
+                    <Switch
+                      id="is_test_mode"
+                      checked={formData.is_test_mode === "true"}
+                      onCheckedChange={(checked) =>
+                        setFormData({
+                          ...formData,
+                          is_test_mode: checked ? "true" : "false",
+                          test_phone_number: checked ? formData.test_phone_number : "",
+                        })
+                      }
+                    />
+                    <span className="text-sm text-muted-foreground">
+                      {formData.is_test_mode === "true" ? "Ativado" : "Desativado"}
+                    </span>
+                  </div>
+                  {formData.is_test_mode === "true" && (
+                    <div className="mt-2">
+                      <Label htmlFor="test_phone_number">Telefone de Teste *</Label>
+                      <p className="text-xs text-muted-foreground mt-0.5">
+                        Número de telefone no formato: 558192387425 (apenas dígitos, sem espaços ou caracteres especiais)
+                      </p>
+                      <Input
+                        id="test_phone_number"
+                        value={formData.test_phone_number}
+                        onChange={(e) =>
+                          setFormData({
+                            ...formData,
+                            test_phone_number: e.target.value.replace(/\D/g, ""),
+                          })
+                        }
+                        placeholder="558192387425"
+                        required
+                      />
+                    </div>
+                  )}
                 </div>
               </div>
               <Button type="submit">

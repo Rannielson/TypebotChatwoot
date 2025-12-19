@@ -2,13 +2,10 @@ version: "3.8"
 
 services:
 
-
   ## --------------------------- API GERAL --------------------------- ##
   # API para rotas administrativas (auth, tenants, inboxes, sessions)
   typebot_connector_api:
-    build:
-      context: ..
-      dockerfile: docker/Dockerfile
+    image: rannielson/conectortypebot-backend:latest
     networks:
       - minha_rede
     command: node dist/index.js
@@ -57,9 +54,7 @@ services:
   ## --------------------------- WEBHOOK API --------------------------- ##
   # API dedicada para receber webhooks (alta escalabilidade)
   typebot_connector_webhook:
-    build:
-      context: ..
-      dockerfile: docker/Dockerfile
+    image: rannielson/conectortypebot-backend:latest
     networks:
       - minha_rede
     command: node dist/webhook-server.js
@@ -110,9 +105,7 @@ services:
   ## --------------------------- WORKERS --------------------------- ##
   # Workers para processar jobs (webhook, log, chatwoot-note)
   typebot_connector_worker:
-    build:
-      context: ..
-      dockerfile: docker/Dockerfile
+    image: rannielson/conectortypebot-backend:latest
     networks:
       - minha_rede
     command: node dist/workers/index.js
@@ -152,58 +145,10 @@ services:
         - io.portainer.accesscontrol.users=admin
         # Workers não expõem portas, apenas processam jobs
 
-  ## --------------------------- TRIGGER SCHEDULER --------------------------- ##
-  # Serviço dedicado para executar os schedulers de triggers (node-cron)
-  typebot_connector_trigger_scheduler:
-    build:
-      context: ..
-      dockerfile: docker/Dockerfile
-    networks:
-      - minha_rede
-    command: node dist/trigger-scheduler.js
-    environment:
-      NODE_ENV: production
-      POSTGRES_HOST: postgres
-      POSTGRES_PORT: 5432
-      POSTGRES_DB: connectoratomos
-      POSTGRES_USER: postgres
-      POSTGRES_PASSWORD: 6a31b0c912e754caf48d965c5cae3490
-      REDIS_HOST: keydb
-      REDIS_PORT: 6381
-      REDIS_PASSWORD: 
-      CHATWOOT_DEFAULT_URL: https://chatconnect.cleoia.com.br
-      CHATWOOT_DEFAULT_TOKEN: 
-    volumes:
-      - connector_logs:/app/logs
-    deploy:
-      mode: replicated
-      replicas: 1
-      placement:
-        constraints:
-          - node.role == manager
-      resources:
-        limits:
-          cpus: "0.5"
-          memory: 512M
-      restart_policy:
-        condition: on-failure
-        delay: 5s
-        max_attempts: 3
-      labels:
-        - io.portainer.accesscontrol.users=admin
-        # Trigger scheduler não expõe portas, apenas executa cron jobs
-        # IMPORTANTE: Apenas 1 réplica é necessária para evitar execuções duplicadas
-
   ## --------------------------- FRONTEND --------------------------- ##
   # Frontend Next.js
   typebot_connector_frontend:
-    build:
-      context: ../frontend
-      dockerfile: Dockerfile
-      target: runner-prod
-      args:
-        BUILD_ENV: production
-        NEXT_PUBLIC_API_URL: https://apiconnect.atomos.tech/api
+    image: rannielson/conectortypebot-frontend:latest
     networks:
       - minha_rede
     environment:

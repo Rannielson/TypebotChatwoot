@@ -51,7 +51,13 @@ export class TypebotClient {
         hasMessages: !!data.messages,
         messagesLength: data.messages?.length || 0,
         hasInput: !!data.input,
+        hasClientSideActions: !!data.clientSideActions,
+        clientSideActionsLength: data.clientSideActions?.length || 0,
       });
+      
+      if (data.clientSideActions && data.clientSideActions.length > 0) {
+        console.log(`[TypebotClient] ⏱️ ClientSideActions encontrados:`, JSON.stringify(data.clientSideActions, null, 2));
+      }
       
       if (!data.sessionId) {
         console.error(`[TypebotClient] ❌ Resposta sem sessionId! Resposta completa:`, JSON.stringify(response.data, null, 2));
@@ -117,7 +123,13 @@ export class TypebotClient {
         hasMessages: !!data.messages,
         messagesLength: data.messages?.length || 0,
         hasInput: !!data.input,
+        hasClientSideActions: !!data.clientSideActions,
+        clientSideActionsLength: data.clientSideActions?.length || 0,
       });
+      
+      if (data.clientSideActions && data.clientSideActions.length > 0) {
+        console.log(`[TypebotClient] ⏱️ ClientSideActions encontrados:`, JSON.stringify(data.clientSideActions, null, 2));
+      }
       
       // Se não retornou sessionId, preserva o sessionId original
       if (!data.sessionId) {
@@ -133,6 +145,100 @@ export class TypebotClient {
         error.message;
       throw new Error(
         `Erro ao continuar chat no Typebot: ${errorMessage}`
+      );
+    }
+  }
+
+  /**
+   * Envia um comando para o Typebot usando o sistema de Command Events
+   * Preserva a sessão existente (não cria nova sessão)
+   * 
+   * Formato correto conforme documentação da API:
+   * {
+   *   "message": {
+   *     "type": "command",
+   *     "text": "<command_name>"
+   *   }
+   * }
+   */
+  async sendCommand(
+    sessionId: string,
+    commandName: string
+  ): Promise<TypebotResponse> {
+    try {
+      // Formato correto conforme documentação da API do Typebot
+      // A API espera message.command (não message.text)
+      const body = {
+        message: {
+          type: 'command',
+          command: commandName,
+        },
+      };
+
+      const endpoint = `/api/v1/sessions/${sessionId}/continueChat`;
+      const fullUrl = `${this.baseUrl}${endpoint}`;
+      
+      console.log(`\n🌐 [TypebotClient] Enviando comando para o Typebot:`);
+      console.log(`   • Método: POST`);
+      console.log(`   • URL: ${fullUrl}`);
+      console.log(`   • Session ID: ${sessionId}`);
+      console.log(`   • Comando: ${commandName}`);
+      console.log(`   • Payload:`, JSON.stringify(body, null, 2));
+      
+      const response = await this.client.post<TypebotResponse | TypebotResponse[]>(
+        endpoint,
+        body
+      );
+      
+      // Typebot pode retornar array ou objeto direto
+      let data = Array.isArray(response.data) ? response.data[0] : response.data;
+      
+      // Garante que messages seja sempre um array (mesmo que vazio)
+      if (!data.messages) {
+        data.messages = [];
+      }
+      
+      // Garante que logs seja sempre um array (mesmo que vazio)
+      if (!data.logs) {
+        data.logs = [];
+      }
+      
+      // Garante que clientSideActions seja sempre um array (mesmo que vazio)
+      if (!data.clientSideActions) {
+        data.clientSideActions = [];
+      }
+      
+      console.log(`[TypebotClient] Resposta sendCommand (tipo: ${Array.isArray(response.data) ? 'array' : 'objeto'}):`, {
+        hasSessionId: !!data.sessionId,
+        sessionId: data.sessionId,
+        hasMessages: !!data.messages,
+        messagesLength: data.messages?.length || 0,
+        hasInput: !!data.input,
+        hasClientSideActions: !!data.clientSideActions,
+        clientSideActionsLength: data.clientSideActions?.length || 0,
+        hasLogs: !!data.logs,
+        logsLength: data.logs?.length || 0,
+      });
+      
+      // Log detalhado dos logs se houver
+      if (data.logs && data.logs.length > 0) {
+        console.log(`[TypebotClient] 📋 Logs encontrados na resposta:`, JSON.stringify(data.logs, null, 2));
+      }
+      
+      // Se não retornou sessionId, preserva o sessionId original
+      if (!data.sessionId) {
+        console.log(`[TypebotClient] ⚠️ sendCommand não retornou sessionId, preservando o original: ${sessionId}`);
+        data.sessionId = sessionId;
+      }
+      
+      return data;
+    } catch (error: any) {
+      const errorMessage =
+        error.response?.data?.message ||
+        error.response?.data?.error ||
+        error.message;
+      throw new Error(
+        `Erro ao enviar comando no Typebot: ${errorMessage}`
       );
     }
   }

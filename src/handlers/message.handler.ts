@@ -2,7 +2,7 @@ import { NormalizedChatwootMessage } from '../types/chatwoot';
 import { Inbox } from '../models/inbox.model';
 import { Tenant } from '../models/tenant.model';
 import { TypebotClient } from '../clients/typebot.client';
-import { TypebotStartChatRequest } from '../types/typebot';
+import { TypebotStartChatRequest, TypebotResponse } from '../types/typebot';
 import { WhatsAppClient } from '../clients/whatsapp.client';
 import { ChatwootClient } from '../clients/chatwoot.client';
 import { SessionService } from '../services/session.service';
@@ -15,6 +15,8 @@ import { redis } from '../config/redis';
 import { messageLogQueue } from '../config/queue.config';
 import { chatwootNoteQueue } from '../config/queue.config';
 import { CacheService } from '../services/cache.service';
+import { TranscriptionService } from '../services/transcription.service';
+import { isAudioFile } from '../utils/audio-detector.util';
 
 export class MessageHandler {
   /**
@@ -29,10 +31,12 @@ export class MessageHandler {
    * - account_id: ID da conta no Chatwoot
    * - inbox_id: ID do inbox no Chatwoot
    * - timestamp: Timestamp da mensagem (ISO 8601)
+   * - speechtotext: "yes" se foi transcrição de áudio, "no" se foi texto direto
    */
   private buildTypebotVariables(
     normalizedMessage: NormalizedChatwootMessage,
-    conversationId: number
+    conversationId: number,
+    isSpeechToText: boolean = false
   ): Record<string, string> {
     return {
       // Informações do contato
@@ -49,6 +53,9 @@ export class MessageHandler {
       
       // Timestamp
       timestamp: normalizedMessage.message.timestamp || new Date().toISOString(),
+      
+      // Indica se a mensagem foi transcrita de áudio
+      speechtotext: isSpeechToText ? 'yes' : 'no',
     };
   }
   async handleMessage(
@@ -76,6 +83,25 @@ export class MessageHandler {
     if (!messageText && !hasAttachments) {
       console.log('Mensagem sem conteúdo nem anexos, ignorando');
       return;
+    }
+
+    // Filtro de modo teste: se estiver ativo, processa apenas mensagens do telefone especificado
+    if (inbox.is_test_mode && inbox.test_phone_number) {
+      // Normaliza ambos os números para comparação (apenas dígitos)
+      const normalizedIncomingPhone = phoneNumber.replace(/\D/g, '');
+      const normalizedTestPhone = inbox.test_phone_number.replace(/\D/g, '');
+      
+      if (normalizedIncomingPhone !== normalizedTestPhone) {
+        console.log(
+          `[MessageHandler] 🧪 Modo teste ativo: mensagem de ${phoneNumber} (${normalizedIncomingPhone}) ignorada. ` +
+          `Apenas mensagens de ${inbox.test_phone_number} (${normalizedTestPhone}) são processadas.`
+        );
+        return; // Ignora mensagem de telefone diferente
+      }
+      
+      console.log(
+        `[MessageHandler] 🧪 Modo teste ativo: processando mensagem do telefone autorizado ${phoneNumber}`
+      );
     }
 
     // Verifica se a sessão está pausada antes de processar
@@ -125,6 +151,107 @@ export class MessageHandler {
     console.log(
       `[Account: ${account_id}, Inbox: ${inbox_id}] Processando mensagem de ${name} (${phoneNumber}): ${messageText || 'com anexos'}`
     );
+
+    // Processa anexos de áudio antes de enviar ao Typebot
+    let processedMessageText = messageText;
+    let processedAttachments = attachments ? [...attachments] : [];
+    let hasTranscribedAudio = false; // Flag para indicar se houve transcrição de áudio
+
+    console.log(
+      `[MessageHandler] 🔍 Verificando anexos: hasAttachments=${hasAttachments}, ` +
+      `attachments?.length=${attachments?.length}, tenant.openai_api_key=${tenant.openai_api_key ? 'configurada' : 'NÃO configurada'}`
+    );
+
+    if (hasAttachments && attachments) {
+      console.log(
+        `[MessageHandler] 📎 Processando ${attachments.length} anexo(s). Detalhes:`,
+        JSON.stringify(attachments.map(att => ({
+          id: att.id,
+          file_type: att.file_type,
+          data_url: att.data_url,
+          file_size: att.file_size,
+        })), null, 2)
+      );
+
+      const audioAttachments = attachments.filter(att => {
+        const isAudio = isAudioFile(att.file_type, att.data_url);
+        console.log(
+          `[MessageHandler] 🔍 Verificando anexo ${att.id}: file_type="${att.file_type}", ` +
+          `url="${att.data_url}", é áudio? ${isAudio}`
+        );
+        return isAudio;
+      });
+
+      if (audioAttachments.length > 0) {
+        console.log(
+          `[MessageHandler] 🎵 Detectado(s) ${audioAttachments.length} arquivo(s) de áudio. Iniciando transcrição...`
+        );
+
+        // Verifica se tenant tem API key configurada
+        if (!tenant.openai_api_key || tenant.openai_api_key.trim() === '') {
+          console.log(
+            `[MessageHandler] ⚠️ Tenant ${tenant.id} não possui OpenAI API key configurada. ` +
+            `Áudios serão enviados sem transcrição.`
+          );
+        } else {
+          // Processa cada áudio sequencialmente
+          for (const audioAttachment of audioAttachments) {
+            try {
+              console.log(
+                `[MessageHandler] 🎤 Transcrevendo áudio: ${audioAttachment.file_type} ` +
+                `(${audioAttachment.file_size ? (audioAttachment.file_size / 1024).toFixed(2) + 'KB' : 'tamanho desconhecido'})`
+              );
+
+              const transcribedText = await TranscriptionService.transcribeAudioFromUrl(
+                audioAttachment.data_url,
+                tenant.openai_api_key!
+              );
+
+              if (transcribedText && transcribedText.trim()) {
+                // Marca que houve transcrição de áudio
+                hasTranscribedAudio = true;
+                
+                // Adiciona texto transcrito à mensagem (sem prefixo, como se fosse texto normal)
+                if (processedMessageText) {
+                  // Se já houver texto, adiciona o transcrito na mesma linha ou em nova linha
+                  processedMessageText = processedMessageText.trim() 
+                    ? `${processedMessageText}\n${transcribedText}`
+                    : transcribedText;
+                } else {
+                  // Se não houver texto, usa apenas o texto transcrito
+                  processedMessageText = transcribedText;
+                }
+
+                console.log(
+                  `[MessageHandler] ✅ Transcrição concluída. Texto adicionado à mensagem como texto normal.`
+                );
+                console.log(
+                  `[MessageHandler] 📝 Texto final que será enviado: "${processedMessageText.substring(0, 200)}${processedMessageText.length > 200 ? '...' : ''}"`
+                );
+
+                // Remove áudio da lista de anexos
+                processedAttachments = processedAttachments.filter(
+                  att => att.id !== audioAttachment.id
+                );
+              } else {
+                console.warn(
+                  `[MessageHandler] ⚠️ Transcrição retornou texto vazio. Áudio será mantido nos anexos.`
+                );
+              }
+            } catch (error: any) {
+              console.error(
+                `[MessageHandler] ❌ Erro ao transcrever áudio (ID: ${audioAttachment.id}):`,
+                error.message
+              );
+              console.error(
+                `[MessageHandler] Áudio será enviado sem transcrição para o Typebot.`
+              );
+              // Mantém o áudio nos anexos em caso de erro
+            }
+          }
+        }
+      }
+    }
 
     const typebotClient = new TypebotClient(
       inbox.typebot_base_url,
@@ -177,25 +304,25 @@ export class MessageHandler {
     if (session) {
       console.log(`Continuando sessão Typebot: ${session.sessionId}`);
 
-      const attachedFileUrls = attachments?.map((att) => att.data_url) || [];
+      const attachedFileUrls = processedAttachments?.map((att) => att.data_url) || [];
 
       // Log detalhado das informações enviadas para o Typebot
       this.logTypebotRequest('continueChat', session.sessionId, {
-        message: messageText || '',
+        message: processedMessageText || '',
         attachedFileUrls: attachedFileUrls.length > 0 ? attachedFileUrls : undefined,
       }, {
         normalizedMessage,
         conversationId,
         phoneNumber,
-        messageText,
-        hasAttachments: hasAttachments || false,
-        attachmentsCount: attachments?.length || 0,
+        messageText: processedMessageText,
+        hasAttachments: processedAttachments.length > 0,
+        attachmentsCount: processedAttachments.length,
       });
 
       try {
         typebotResponse = await typebotClient.continueChat(
           session.sessionId,
-          messageText || '',
+          processedMessageText || '',
           attachedFileUrls.length > 0 ? attachedFileUrls : undefined
         );
 
@@ -231,12 +358,13 @@ export class MessageHandler {
 
       // Inicia o chat com mensagem e variáveis pré-preenchidas
       // Formato simplificado: sempre envia message (string) e prefilledVariables
-      const attachedFileUrls = attachments?.map((att) => att.data_url) || [];
+      const attachedFileUrls = processedAttachments?.map((att) => att.data_url) || [];
       
       // Constrói variáveis pré-preenchidas do normalizador
       const prefilledVariables = this.buildTypebotVariables(
         normalizedMessage,
-        conversationId
+        conversationId,
+        hasTranscribedAudio
       );
       
       // Monta o request no formato simplificado
@@ -246,13 +374,13 @@ export class MessageHandler {
         ? {
             message: {
               type: 'text',
-              text: messageText || '',
+              text: processedMessageText || '',
               attachedFileUrls: attachedFileUrls,
             },
             prefilledVariables,
           }
         : {
-            message: messageText || '', // String vazia se não houver texto
+            message: processedMessageText || '', // String vazia se não houver texto
             prefilledVariables,
           };
 
@@ -261,9 +389,9 @@ export class MessageHandler {
         normalizedMessage,
         conversationId,
         phoneNumber,
-        messageText,
-        hasAttachments: hasAttachments || false,
-        attachmentsCount: attachments?.length || 0,
+        messageText: processedMessageText,
+        hasAttachments: processedAttachments.length > 0,
+        attachmentsCount: processedAttachments.length,
       });
 
       typebotResponse = await typebotClient.startChat(
@@ -330,10 +458,10 @@ export class MessageHandler {
         type: 'log-incoming',
         data: {
           sessionId: dbSessionId,
-          content: messageText,
+          content: processedMessageText,
           contentType: message.content_type,
           chatwootMessageId: message.message_id,
-          attachments,
+          attachments: processedAttachments,
         },
       });
     }
@@ -344,8 +472,35 @@ export class MessageHandler {
       phoneNumber
     );
 
+    // Processa clientSideActions para extrair wait (pega apenas o primeiro)
+    const waitDelayMs = this.extractWaitDelay(typebotResponse);
+    
+    if (waitDelayMs > 0) {
+      console.log(
+        `[MessageHandler] ⏱️ Wait detectado: ${waitDelayMs}ms (${waitDelayMs / 1000}s). ` +
+        `Aplicando entre cada uma das ${whatsappMessages.length} mensagem(ns)...`
+      );
+    } else {
+      console.log(
+        `[MessageHandler] ⏱️ Nenhum wait detectado. Usando delay padrão de 500ms entre mensagens.`
+      );
+    }
+
     // Envia mensagens para WhatsApp
-    for (const whatsappMessage of whatsappMessages) {
+    for (let i = 0; i < whatsappMessages.length; i++) {
+      const whatsappMessage = whatsappMessages[i];
+      
+      // Aplica delay ANTES de enviar a mensagem (exceto a primeira)
+      if (i > 0) {
+        // Se houver wait configurado, usa ele. Caso contrário, usa delay padrão de 500ms
+        const delayToApply = waitDelayMs > 0 ? waitDelayMs : 500;
+        
+        console.log(
+          `[MessageHandler] ⏳ Aguardando ${delayToApply}ms (${delayToApply / 1000}s) antes de enviar mensagem ${i + 1}/${whatsappMessages.length}`
+        );
+        await this.delay(delayToApply);
+      }
+
       const response = await this.sendWhatsAppMessage(
         whatsappMessage,
         whatsappClient
@@ -394,9 +549,6 @@ export class MessageHandler {
           },
         });
       }
-
-      // Delay entre mensagens
-      await this.delay(500);
     }
   }
 
@@ -481,8 +633,8 @@ export class MessageHandler {
     for (const whatsappMessage of whatsappMessages) {
       await this.sendWhatsAppMessage(whatsappMessage, whatsappClient);
       
-      // Cria nota privada no Chatwoot
-      await this.createChatwootPrivateNote(
+      // Cria mensagem no Chatwoot (comum para texto, privada para imagens/listas/botões)
+      await this.createChatwootMessage(
         tenant,
         inbox,
         conversationId,
@@ -569,7 +721,7 @@ export class MessageHandler {
     }
   }
 
-  private async createChatwootPrivateNote(
+  private async createChatwootMessage(
     tenant: Tenant,
     inbox: Inbox,
     conversationId: number,
@@ -587,14 +739,14 @@ export class MessageHandler {
 
     if (!chatwootUrl || !chatwootApiToken) {
       console.log(
-        'Configuração do Chatwoot incompleta (URL ou token faltando), pulando criação de nota privada'
+        'Configuração do Chatwoot incompleta (URL ou token faltando), pulando criação de mensagem'
       );
       return;
     }
 
     if (!accountId) {
       console.log(
-        `Account ID do Chatwoot não configurado no tenant ${tenant.id}, pulando criação de nota privada`
+        `Account ID do Chatwoot não configurado no tenant ${tenant.id}, pulando criação de mensagem`
       );
       return;
     }
@@ -603,13 +755,19 @@ export class MessageHandler {
       const chatwootClient = new ChatwootClient(chatwootUrl, chatwootApiToken);
       const noteContent = formatWhatsAppMessageForChatwoot(whatsappMessage);
 
-      await chatwootClient.createPrivateNote(
+      // Lógica: apenas texto usa mensagem comum (private: false)
+      // Imagens, listas e botões usam nota privada (private: true)
+      const isPrivate = whatsappMessage.type !== 'text';
+
+      await chatwootClient.createMessage(
         accountId,
         conversationId,
-        noteContent
+        noteContent,
+        isPrivate
       );
     } catch (error: any) {
-      console.error('Erro ao criar nota privada no Chatwoot:', error);
+      const messageType = whatsappMessage.type === 'text' ? 'mensagem comum' : 'nota privada';
+      console.error(`Erro ao criar ${messageType} no Chatwoot:`, error);
       // Não lança erro para não interromper o fluxo principal
     }
   }
@@ -692,6 +850,62 @@ export class MessageHandler {
     console.log(`   • Timestamp: ${context.normalizedMessage.message.timestamp || 'N/A'}`);
     
     console.log('\n' + '='.repeat(80) + '\n');
+  }
+
+  /**
+   * Extrai delay do primeiro wait action do Typebot response
+   * Retorna delay em milissegundos (0 se não houver wait)
+   * 
+   * Regras:
+   * - Pega apenas o primeiro wait encontrado
+   * - Se tiver `secondsToWaitFor`, converte segundos para milissegundos
+   * - Se tiver `timeout`, usa diretamente (já está em milissegundos)
+   * - Se não tiver nenhum, retorna 0
+   */
+  private extractWaitDelay(typebotResponse: TypebotResponse): number {
+    if (!typebotResponse.clientSideActions || typebotResponse.clientSideActions.length === 0) {
+      return 0;
+    }
+
+    console.log(
+      `[MessageHandler] 🔍 Analisando clientSideActions:`,
+      JSON.stringify(typebotResponse.clientSideActions, null, 2)
+    );
+
+    // Procura o primeiro wait action
+    for (const action of typebotResponse.clientSideActions) {
+      if (action.type === 'wait' && action.wait) {
+        let delayMs = 0;
+        
+        // Prioridade: secondsToWaitFor > timeout
+        if (action.wait.secondsToWaitFor !== undefined) {
+          // Converte segundos para milissegundos
+          delayMs = action.wait.secondsToWaitFor * 1000;
+          console.log(
+            `[MessageHandler] ⏱️ Wait encontrado: ${action.wait.secondsToWaitFor}s (${delayMs}ms)`
+          );
+        } else if (action.wait.timeout !== undefined) {
+          // Já está em milissegundos
+          delayMs = action.wait.timeout;
+          console.log(
+            `[MessageHandler] ⏱️ Wait encontrado: ${delayMs}ms (timeout)`
+          );
+        } else if (action.wait.event) {
+          // Se tem event mas não tem tempo, usa delay padrão de 1s
+          delayMs = 1000;
+          console.log(
+            `[MessageHandler] ⏱️ Wait encontrado (event sem tempo): ${delayMs}ms (event: ${action.wait.event})`
+          );
+        }
+        
+        // Retorna o primeiro wait encontrado (ignora os demais)
+        if (delayMs > 0) {
+          return delayMs;
+        }
+      }
+    }
+
+    return 0;
   }
 
   private delay(ms: number): Promise<void> {

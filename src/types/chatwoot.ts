@@ -133,3 +133,71 @@ export interface PauseSessionData {
   phoneNumber: string;
 }
 
+export interface ConversationData {
+  id: number;
+  account_id: number;
+  inbox_id: number;
+  uuid?: string;
+  status: string;
+  assignee_id: number | null;
+  last_activity_at: number;
+  created_at: number;
+  timestamp: number;
+  can_reply: boolean;
+  unread_count: number;
+  priority?: number | null;
+  waiting_since?: number;
+  muted?: boolean;
+  snoozed_until?: number | null;
+  labels?: Array<{ id: number; title: string }>;
+  meta?: {
+    sender?: {
+      id: number;
+      name: string;
+      phone_number: string;
+      identifier: string;
+      email?: string | null;
+      thumbnail?: string;
+      last_activity_at?: number;
+      created_at?: number;
+      additional_attributes?: Record<string, any>;
+      custom_attributes?: Record<string, any>;
+    };
+    channel?: string;
+    team?: {
+      id: number;
+      name: string;
+    } | null;
+    assignee?: {
+      id: number;
+      name?: string;
+      available_name?: string;
+    } | null;
+    hmac_verified?: boolean;
+  };
+  messages?: Array<{
+    id: number;
+    content: string;
+    created_at: number;
+    conversation?: {
+      assignee_id: number | null;
+      team_id?: number | null;
+      last_activity_at: number;
+      contact_inbox?: {
+        source_id: string;
+      };
+    };
+  }>;
+  last_non_activity_message?: {
+    id: number;
+    content: string;
+    created_at: number;
+  };
+  agent_last_seen_at?: number;
+  assignee_last_seen_at?: number;
+  contact_last_seen_at?: number;
+  first_reply_created_at?: number;
+  sla_policy_id?: number | null;
+  sla_events?: Array<any>;
+}
+

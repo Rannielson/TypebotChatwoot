@@ -163,6 +163,38 @@ services:
     # Nota: Para usar múltiplas réplicas, use: docker-compose up --scale worker=N
     # Ou defina WORKER_REPLICAS no .env e use o script docker/start-workers.sh
 
+  # Trigger Scheduler - Serviço dedicado para executar os schedulers de triggers (node-cron)
+  trigger-scheduler:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
+    container_name: typebot_connector_trigger_scheduler
+    command: node dist/trigger-scheduler.js
+    environment:
+      NODE_ENV: ${NODE_ENV:-production}
+      POSTGRES_HOST: postgres
+      POSTGRES_PORT: 5432
+      POSTGRES_DB: ${POSTGRES_DB:-typebot_connector}
+      POSTGRES_USER: ${POSTGRES_USER:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+      REDIS_PASSWORD: ${REDIS_PASSWORD:-}
+      CHATWOOT_DEFAULT_URL: ${CHATWOOT_DEFAULT_URL:-https://chatconnect.cleoia.com.br}
+      CHATWOOT_DEFAULT_TOKEN: ${CHATWOOT_DEFAULT_TOKEN:-}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    volumes:
+      - ../logs:/app/logs
+    restart: unless-stopped
+    networks:
+      - connector_network
+    # Nota: Normalmente apenas 1 réplica do trigger-scheduler é necessária
+    # Múltiplas réplicas podem causar execuções duplicadas dos triggers
+
   frontend:
     build:
       context: ../frontend

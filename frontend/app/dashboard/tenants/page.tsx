@@ -15,6 +15,7 @@ interface Tenant {
   chatwoot_url: string;
   chatwoot_token?: string;
   chatwoot_account_id?: number;
+  openai_api_key?: string;
   created_at: string;
   updated_at: string;
 }
@@ -30,6 +31,7 @@ export default function TenantsPage() {
     chatwoot_url: "",
     chatwoot_token: "",
     chatwoot_account_id: "",
+    openai_api_key: "",
   });
 
   useEffect(() => {
@@ -61,6 +63,7 @@ export default function TenantsPage() {
         chatwoot_account_id: formData.chatwoot_account_id
           ? parseInt(formData.chatwoot_account_id)
           : undefined,
+        openai_api_key: formData.openai_api_key || undefined,
       };
 
       if (editingTenant) {
@@ -84,6 +87,7 @@ export default function TenantsPage() {
         chatwoot_url: "",
         chatwoot_token: "",
         chatwoot_account_id: "",
+        openai_api_key: "",
       });
       fetchTenants();
     } catch (error: any) {
@@ -102,6 +106,7 @@ export default function TenantsPage() {
       chatwoot_url: tenant.chatwoot_url,
       chatwoot_token: tenant.chatwoot_token || "",
       chatwoot_account_id: tenant.chatwoot_account_id?.toString() || "",
+      openai_api_key: tenant.openai_api_key || "",
     });
     setShowForm(true);
   };
@@ -199,6 +204,24 @@ export default function TenantsPage() {
                     })
                   }
                 />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="openai_api_key">API Key da OpenAI (opcional)</Label>
+                <Input
+                  id="openai_api_key"
+                  type="password"
+                  placeholder="sk-proj-..."
+                  value={formData.openai_api_key}
+                  onChange={(e) =>
+                    setFormData({
+                      ...formData,
+                      openai_api_key: e.target.value,
+                    })
+                  }
+                />
+                <p className="text-xs text-muted-foreground">
+                  Necessária para transcrição automática de áudios. Deixe vazio para desabilitar.
+                </p>
               </div>
               <Button type="submit">
                 {editingTenant ? "Atualizar" : "Criar"}

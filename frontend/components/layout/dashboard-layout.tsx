@@ -4,7 +4,7 @@ import { useEffect, useState } from "react";
 import { useRouter, usePathname } from "next/navigation";
 import Link from "next/link";
 import { Button } from "@/components/ui/button";
-import { RiDashboardLine, RiBuilding2Line, RiInboxLine, RiLogoutBoxLine, RiSunLine, RiMoonLine } from "@remixicon/react";
+import { RiDashboardLine, RiBuilding2Line, RiInboxLine, RiLogoutBoxLine, RiSunLine, RiMoonLine, RiFlaskLine } from "@remixicon/react";
 import { useTheme } from "next-themes";
 import { useToast } from "@/hooks/use-toast";
 
@@ -48,6 +48,7 @@ export function DashboardLayout({ children }: DashboardLayoutProps) {
     { href: "/dashboard", label: "Dashboard", icon: RiDashboardLine },
     { href: "/dashboard/tenants", label: "Tenants", icon: RiBuilding2Line },
     { href: "/dashboard/inboxes", label: "Inboxes", icon: RiInboxLine },
+    { href: "/dashboard/triggers", label: "Triggers", icon: RiFlaskLine },
   ];
 
   return (

@@ -6,6 +6,7 @@ export interface Tenant {
   chatwoot_url: string | null;
   chatwoot_token: string | null;
   chatwoot_account_id: number | null;
+  openai_api_key: string | null;
   created_at: Date;
   updated_at: Date;
 }
@@ -15,6 +16,7 @@ export interface CreateTenantData {
   chatwoot_url?: string;
   chatwoot_token?: string;
   chatwoot_account_id?: number;
+  openai_api_key?: string;
 }
 
 export class TenantModel {
@@ -30,12 +32,13 @@ export class TenantModel {
 
   static async create(data: CreateTenantData): Promise<Tenant> {
     const result = await db.query(
-      'INSERT INTO tenants (name, chatwoot_url, chatwoot_token, chatwoot_account_id) VALUES ($1, $2, $3, $4) RETURNING *',
+      'INSERT INTO tenants (name, chatwoot_url, chatwoot_token, chatwoot_account_id, openai_api_key) VALUES ($1, $2, $3, $4, $5) RETURNING *',
       [
         data.name,
         data.chatwoot_url || null,
         data.chatwoot_token || null,
         data.chatwoot_account_id || null,
+        data.openai_api_key || null,
       ]
     );
     return result.rows[0];
@@ -64,6 +67,10 @@ export class TenantModel {
     if (data.chatwoot_account_id !== undefined) {
       fields.push(`chatwoot_account_id = $${paramCount++}`);
       values.push(data.chatwoot_account_id || null);
+    }
+    if (data.openai_api_key !== undefined) {
+      fields.push(`openai_api_key = $${paramCount++}`);
+      values.push(data.openai_api_key || null);
     }
 
     fields.push(`updated_at = CURRENT_TIMESTAMP`);

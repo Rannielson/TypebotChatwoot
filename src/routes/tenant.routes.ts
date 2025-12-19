@@ -26,7 +26,7 @@ router.get('/:id', async (req: Request, res: Response) => {
 
 router.post('/', async (req: Request, res: Response) => {
   try {
-    const { name, chatwoot_url, chatwoot_token, chatwoot_account_id } = req.body;
+    const { name, chatwoot_url, chatwoot_token, chatwoot_account_id, openai_api_key } = req.body;
 
     if (!name) {
       return res.status(400).json({ error: 'Name is required' });
@@ -37,6 +37,7 @@ router.post('/', async (req: Request, res: Response) => {
       chatwoot_url,
       chatwoot_token,
       chatwoot_account_id,
+      openai_api_key,
     });
     res.status(201).json(tenant);
   } catch (error: any) {
@@ -46,12 +47,13 @@ router.post('/', async (req: Request, res: Response) => {
 
 router.put('/:id', async (req: Request, res: Response) => {
   try {
-    const { name, chatwoot_url, chatwoot_token, chatwoot_account_id } = req.body;
+    const { name, chatwoot_url, chatwoot_token, chatwoot_account_id, openai_api_key } = req.body;
     const tenant = await TenantService.update(parseInt(req.params.id), {
       name,
       chatwoot_url,
       chatwoot_token,
       chatwoot_account_id,
+      openai_api_key,
     });
     res.json(tenant);
   } catch (error: any) {
