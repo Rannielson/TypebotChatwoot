@@ -1,4 +1,5 @@
 import { InboxModel, CreateInboxData } from '../models/inbox.model';
+import { CacheService } from './cache.service';
 
 export class InboxService {
   static async findAll() {
@@ -39,13 +40,27 @@ export class InboxService {
   }
 
   static async update(id: number, data: Partial<CreateInboxData>) {
-    await this.findById(id); // Verifica se existe
-    return await InboxModel.update(id, data);
+    // Busca o inbox antes de atualizar para obter o inbox_id (Chatwoot inbox ID) usado como chave do cache
+    const existingInbox = await this.findById(id);
+    
+    // Atualiza no banco
+    const updatedInbox = await InboxModel.update(id, data);
+    
+    // Invalida o cache usando o inbox_id (Chatwoot inbox ID) que é usado como chave no CacheService
+    await CacheService.invalidateInbox(existingInbox.inbox_id);
+    
+    return updatedInbox;
   }
 
   static async delete(id: number) {
-    await this.findById(id); // Verifica se existe
+    // Busca o inbox antes de deletar para obter o inbox_id (Chatwoot inbox ID) usado como chave do cache
+    const existingInbox = await this.findById(id);
+    
+    // Deleta do banco
     await InboxModel.delete(id);
+    
+    // Invalida o cache usando o inbox_id (Chatwoot inbox ID) que é usado como chave no CacheService
+    await CacheService.invalidateInbox(existingInbox.inbox_id);
   }
 }
 

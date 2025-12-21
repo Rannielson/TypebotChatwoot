@@ -1,4 +1,5 @@
 import { TenantModel, CreateTenantData } from '../models/tenant.model';
+import { CacheService } from './cache.service';
 
 export class TenantService {
   static async findAll() {
@@ -19,12 +20,24 @@ export class TenantService {
 
   static async update(id: number, data: Partial<CreateTenantData>) {
     await this.findById(id); // Verifica se existe
-    return await TenantModel.update(id, data);
+    
+    // Atualiza no banco
+    const updatedTenant = await TenantModel.update(id, data);
+    
+    // Invalida o cache do tenant
+    await CacheService.invalidateTenant(id);
+    
+    return updatedTenant;
   }
 
   static async delete(id: number) {
     await this.findById(id); // Verifica se existe
+    
+    // Deleta do banco
     await TenantModel.delete(id);
+    
+    // Invalida o cache do tenant
+    await CacheService.invalidateTenant(id);
   }
 }
 
