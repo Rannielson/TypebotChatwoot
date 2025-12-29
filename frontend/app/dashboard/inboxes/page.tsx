@@ -6,7 +6,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
-import { RiAddLine, RiEditLine, RiDeleteBinLine, RiInboxLine } from "@remixicon/react";
+import { RiAddLine, RiEditLine, RiDeleteBinLine, RiInboxLine, RiCloseCircleLine } from "@remixicon/react";
 import api from "@/lib/api";
 import { useToast } from "@/hooks/use-toast";
 
@@ -41,6 +41,14 @@ export default function InboxesPage() {
   const [loading, setLoading] = useState(true);
   const [showForm, setShowForm] = useState(false);
   const [editingInbox, setEditingInbox] = useState<Inbox | null>(null);
+  const [showCloseBulkDialog, setShowCloseBulkDialog] = useState(false);
+  const [selectedInboxForBulk, setSelectedInboxForBulk] = useState<Inbox | null>(null);
+  const [bulkCloseLoading, setBulkCloseLoading] = useState(false);
+  const [bulkCloseFilters, setBulkCloseFilters] = useState({
+    status: "",
+    older_than_hours: "",
+    conversation_status: "",
+  });
   const [formData, setFormData] = useState({
     tenant_id: "",
     inbox_id: "",
@@ -182,6 +190,72 @@ export default function InboxesPage() {
         description: error.response?.data?.message || "Erro desconhecido",
         variant: "destructive",
       });
+    }
+  };
+
+  const handleOpenCloseBulkDialog = (inbox: Inbox) => {
+    setSelectedInboxForBulk(inbox);
+    setBulkCloseFilters({
+      status: "",
+      older_than_hours: "",
+      conversation_status: "",
+    });
+    setShowCloseBulkDialog(true);
+  };
+
+  const handleCloseBulkSessions = async () => {
+    if (!selectedInboxForBulk) return;
+
+    const filters: any = {};
+    if (bulkCloseFilters.status) filters.status = bulkCloseFilters.status;
+    if (bulkCloseFilters.older_than_hours) {
+      const hours = parseInt(bulkCloseFilters.older_than_hours);
+      if (isNaN(hours) || hours < 0) {
+        toast({
+          title: "Erro",
+          description: "Horas deve ser um número positivo",
+          variant: "destructive",
+        });
+        return;
+      }
+      filters.older_than_hours = hours;
+    }
+    if (bulkCloseFilters.conversation_status) {
+      filters.conversation_status = bulkCloseFilters.conversation_status;
+    }
+
+    // Confirmação antes de encerrar
+    const filterDesc = [];
+    if (filters.status) filterDesc.push(`Status: ${filters.status}`);
+    if (filters.older_than_hours) filterDesc.push(`Mais antigas que: ${filters.older_than_hours} horas`);
+    if (filters.conversation_status) filterDesc.push(`Conversa: ${filters.conversation_status}`);
+
+    if (!confirm(`Tem certeza que deseja encerrar sessões em massa para o inbox "${selectedInboxForBulk.inbox_name}"?\n\nFiltros: ${filterDesc.join(", ") || "Nenhum (todas as sessões ativas/pausadas)"}`)) {
+      return;
+    }
+
+    setBulkCloseLoading(true);
+    try {
+      const response = await api.post(`/inboxes/${selectedInboxForBulk.id}/sessions/close-bulk`, filters);
+      toast({
+        title: "Sessões encerradas",
+        description: `${response.data.closed} sessão(ões) encerrada(s) com sucesso`,
+      });
+      setShowCloseBulkDialog(false);
+      setSelectedInboxForBulk(null);
+      setBulkCloseFilters({
+        status: "",
+        older_than_hours: "",
+        conversation_status: "",
+      });
+    } catch (error: any) {
+      toast({
+        title: "Erro ao encerrar sessões",
+        description: error.response?.data?.error || "Erro desconhecido",
+        variant: "destructive",
+      });
+    } finally {
+      setBulkCloseLoading(false);
     }
   };
 
@@ -565,24 +639,35 @@ export default function InboxesPage() {
                         <span className="text-red-600">Inativo</span>
                       )}
                     </div>
-                    <div className="flex gap-2 mt-4">
+                    <div className="flex flex-col gap-2 mt-4">
+                      <div className="flex gap-2">
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          onClick={() => handleEdit(inbox)}
+                          className="gap-2 flex-1"
+                        >
+                          <RiEditLine className="h-4 w-4" />
+                          Editar
+                        </Button>
+                        <Button
+                          variant="destructive"
+                          size="sm"
+                          onClick={() => handleDelete(inbox.id)}
+                          className="gap-2 flex-1"
+                        >
+                          <RiDeleteBinLine className="h-4 w-4" />
+                          Excluir
+                        </Button>
+                      </div>
                       <Button
                         variant="outline"
                         size="sm"
-                        onClick={() => handleEdit(inbox)}
-                        className="gap-2"
+                        onClick={() => handleOpenCloseBulkDialog(inbox)}
+                        className="gap-2 w-full"
                       >
-                        <RiEditLine className="h-4 w-4" />
-                        Editar
-                      </Button>
-                      <Button
-                        variant="destructive"
-                        size="sm"
-                        onClick={() => handleDelete(inbox.id)}
-                        className="gap-2"
-                      >
-                        <RiDeleteBinLine className="h-4 w-4" />
-                        Excluir
+                        <RiCloseCircleLine className="h-4 w-4" />
+                        Encerrar Sessões em Massa
                       </Button>
                     </div>
                   </div>
@@ -590,6 +675,106 @@ export default function InboxesPage() {
               </Card>
             );
           })}
+        </div>
+      )}
+
+      {/* Dialog para Encerrar Sessões em Massa */}
+      {showCloseBulkDialog && selectedInboxForBulk && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
+          <Card className="w-full max-w-2xl mx-4 max-h-[90vh] overflow-y-auto">
+            <CardHeader>
+              <CardTitle>Encerrar Sessões em Massa</CardTitle>
+              <CardDescription>
+                Encerrar sessões do inbox "{selectedInboxForBulk.inbox_name}" com filtros específicos
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              <div className="space-y-2">
+                <Label htmlFor="bulk_status">Status da Sessão</Label>
+                <p className="text-xs text-muted-foreground mt-0.5">
+                  Filtra por status da sessão no sistema
+                </p>
+                <select
+                  id="bulk_status"
+                  className="flex h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-xs"
+                  value={bulkCloseFilters.status}
+                  onChange={(e) =>
+                    setBulkCloseFilters({ ...bulkCloseFilters, status: e.target.value })
+                  }
+                >
+                  <option value="">Todas (active e paused)</option>
+                  <option value="active">Apenas Ativas</option>
+                  <option value="paused">Apenas Pausadas</option>
+                </select>
+              </div>
+
+              <div className="space-y-2">
+                <Label htmlFor="bulk_older_than_hours">Sessões Mais Antigas Que (Horas)</Label>
+                <p className="text-xs text-muted-foreground mt-0.5">
+                  Encerra apenas sessões criadas há mais de X horas. Deixe vazio para não filtrar por tempo.
+                </p>
+                <Input
+                  id="bulk_older_than_hours"
+                  type="number"
+                  min="0"
+                  value={bulkCloseFilters.older_than_hours}
+                  onChange={(e) =>
+                    setBulkCloseFilters({
+                      ...bulkCloseFilters,
+                      older_than_hours: e.target.value,
+                    })
+                  }
+                  placeholder="Ex: 24 (sessões com mais de 24 horas)"
+                />
+              </div>
+
+              <div className="space-y-2">
+                <Label htmlFor="bulk_conversation_status">Status da Conversa no Chatwoot</Label>
+                <p className="text-xs text-muted-foreground mt-0.5">
+                  Filtra por status da conversa no Chatwoot. Deixe vazio para não filtrar.
+                </p>
+                <select
+                  id="bulk_conversation_status"
+                  className="flex h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-xs"
+                  value={bulkCloseFilters.conversation_status}
+                  onChange={(e) =>
+                    setBulkCloseFilters({
+                      ...bulkCloseFilters,
+                      conversation_status: e.target.value,
+                    })
+                  }
+                >
+                  <option value="">Todos os status</option>
+                  <option value="open">Open (Aberta)</option>
+                  <option value="resolved">Resolved (Resolvida)</option>
+                  <option value="pending">Pending (Pendente)</option>
+                  <option value="snoozed">Snoozed (Adiada)</option>
+                </select>
+              </div>
+
+              <div className="flex gap-2 pt-4">
+                <Button
+                  variant="outline"
+                  onClick={() => {
+                    setShowCloseBulkDialog(false);
+                    setSelectedInboxForBulk(null);
+                  }}
+                  className="flex-1"
+                  disabled={bulkCloseLoading}
+                >
+                  Cancelar
+                </Button>
+                <Button
+                  variant="destructive"
+                  onClick={handleCloseBulkSessions}
+                  className="flex-1 gap-2"
+                  disabled={bulkCloseLoading}
+                >
+                  {bulkCloseLoading ? "Encerrando..." : "Encerrar Sessões"}
+                </Button>
+              </div>
+            </CardContent>
+          </Card>
         </div>
       )}
     </div>

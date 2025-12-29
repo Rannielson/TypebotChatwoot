@@ -12,12 +12,12 @@ services:
     environment:
       NODE_ENV: production
       PORT: 3000
-      POSTGRES_HOST: postgres
+      POSTGRES_HOST: 37.27.106.75
       POSTGRES_PORT: 5432
       POSTGRES_DB: connectoratomos
       POSTGRES_USER: postgres
       POSTGRES_PASSWORD: 6a31b0c912e754caf48d965c5cae3490
-      REDIS_HOST: keydb
+      REDIS_HOST: 37.27.106.75
       REDIS_PORT: 6381
       REDIS_PASSWORD: 
       JWT_SECRET: 93ef200c1df5490c9606a2124240e790
@@ -61,12 +61,12 @@ services:
     environment:
       NODE_ENV: production
       PORT: 3001
-      POSTGRES_HOST: postgres
+      POSTGRES_HOST: 37.27.106.75
       POSTGRES_PORT: 5432
       POSTGRES_DB: connectoratomos
       POSTGRES_USER: postgres
       POSTGRES_PASSWORD: 6a31b0c912e754caf48d965c5cae3490
-      REDIS_HOST: keydb
+      REDIS_HOST: 37.27.106.75
       REDIS_PORT: 6381
       REDIS_PASSWORD: 
       CHATWOOT_DEFAULT_URL: https://chatconnect.cleoia.com.br
@@ -111,12 +111,12 @@ services:
     command: node dist/workers/index.js
     environment:
       NODE_ENV: production
-      POSTGRES_HOST: postgres
+      POSTGRES_HOST: 37.27.106.75
       POSTGRES_PORT: 5432
       POSTGRES_DB: connectoratomos
       POSTGRES_USER: postgres
       POSTGRES_PASSWORD: 6a31b0c912e754caf48d965c5cae3490
-      REDIS_HOST: keydb
+      REDIS_HOST: 37.27.106.75
       REDIS_PORT: 6381
       REDIS_PASSWORD: 
       CHATWOOT_DEFAULT_URL: https://chatconnect.cleoia.com.br

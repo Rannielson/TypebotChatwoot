@@ -141,5 +141,64 @@ router.delete('/:id', async (req: Request, res: Response) => {
   }
 });
 
+// POST /api/inboxes/:id/sessions/close-bulk - Encerra sessões em massa
+router.post('/:id/sessions/close-bulk', async (req: Request, res: Response) => {
+  try {
+    const inboxId = parseInt(req.params.id);
+    const { status, older_than_hours, conversation_status } = req.body;
+
+    // Valida se o inbox existe
+    await InboxService.findById(inboxId);
+
+    // Valida status se fornecido
+    if (status && !['active', 'paused'].includes(status)) {
+      return res.status(400).json({
+        error: 'Status inválido. Use: active ou paused. Sessões closed e expired não podem ser encerradas.',
+      });
+    }
+
+    // Valida older_than_hours se fornecido
+    if (older_than_hours !== undefined) {
+      const hours = parseInt(older_than_hours);
+      if (isNaN(hours) || hours < 0) {
+        return res.status(400).json({
+          error: 'older_than_hours deve ser um número positivo (horas)',
+        });
+      }
+    }
+
+    // Valida conversation_status se fornecido
+    // Status válidos no Chatwoot: open, resolved, pending, snoozed, etc.
+    if (conversation_status && typeof conversation_status !== 'string') {
+      return res.status(400).json({
+        error: 'conversation_status deve ser uma string (ex: open, resolved, pending)',
+      });
+    }
+
+    const { SessionService } = await import('../services/session.service');
+    const result = await SessionService.closeSessionsBulk(inboxId, {
+      status: status as 'active' | 'paused' | undefined,
+      olderThanHours: older_than_hours ? parseInt(older_than_hours) : undefined,
+      conversationStatus: conversation_status || undefined,
+    });
+
+    res.json({
+      message: `Encerramento em massa concluído`,
+      closed: result.closed,
+      redis_keys_removed: result.redisKeysRemoved,
+      filters: {
+        status: status || 'active e paused',
+        older_than_hours: older_than_hours || 'não aplicado',
+        conversation_status: conversation_status || 'não aplicado',
+      },
+    });
+  } catch (error: any) {
+    if (error.message === 'Inbox not found') {
+      return res.status(404).json({ error: error.message });
+    }
+    res.status(500).json({ error: error.message });
+  }
+});
+
 export default router;
 
