@@ -403,5 +403,106 @@ export class SessionModel {
     }
     return result.rows[0];
   }
+
+  /**
+   * Busca sessões com filtros de status e tempo (horas desde criação)
+   * @param filters Filtros para buscar sessões
+   * @returns Array de sessões que atendem aos critérios
+   */
+  static async findWithTimeFilter(
+    filters: {
+      inboxId: number;
+      status?: 'active' | 'paused' | 'closed' | 'expired';
+      olderThanHours?: number; // Sessões criadas há mais de X horas
+    }
+  ): Promise<SessionHistory[]> {
+    const { inboxId, status, olderThanHours } = filters;
+    const conditions: string[] = [];
+    const values: any[] = [];
+    let paramCount = 1;
+
+    // Filtro obrigatório: inbox_id
+    conditions.push(`s.inbox_id = $${paramCount++}`);
+    values.push(inboxId);
+
+    // Filtro de status
+    if (status) {
+      conditions.push(`s.status = $${paramCount++}`);
+      values.push(status);
+    } else {
+      // Se não especificar status, busca apenas active e paused (sessões que podem ser encerradas)
+      conditions.push(`s.status IN ($${paramCount}, $${paramCount + 1})`);
+      values.push('active', 'paused');
+      paramCount += 2;
+    }
+
+    // Filtro de tempo (sessões criadas há mais de X horas)
+    if (olderThanHours && olderThanHours > 0) {
+      conditions.push(
+        `s.created_at < NOW() - INTERVAL '${olderThanHours} hours'`
+      );
+    }
+
+    const query = `
+      SELECT s.*, i.inbox_name 
+      FROM sessions_history s
+      LEFT JOIN inboxes i ON s.inbox_id = i.id
+      WHERE ${conditions.join(' AND ')}
+      ORDER BY s.created_at DESC
+    `;
+
+    const result = await db.query(query, values);
+    return result.rows;
+  }
+
+  /**
+   * Encerra sessões em massa com base em filtros
+   * @param filters Filtros para encerrar sessões
+   * @returns Número de sessões encerradas
+   */
+  static async closeBulk(
+    filters: {
+      inboxId: number;
+      status?: 'active' | 'paused' | 'closed' | 'expired';
+      olderThanHours?: number; // Sessões criadas há mais de X horas
+    }
+  ): Promise<number> {
+    const { inboxId, status, olderThanHours } = filters;
+    const conditions: string[] = [];
+    const values: any[] = [];
+    let paramCount = 1;
+
+    // Filtro obrigatório: inbox_id
+    conditions.push(`inbox_id = $${paramCount++}`);
+    values.push(inboxId);
+
+    // Filtro de status - só encerra active e paused
+    if (status && ['active', 'paused'].includes(status)) {
+      conditions.push(`status = $${paramCount++}`);
+      values.push(status);
+    } else {
+      // Se não especificar ou especificar outro status, encerra apenas active e paused
+      conditions.push(`status IN ($${paramCount}, $${paramCount + 1})`);
+      values.push('active', 'paused');
+      paramCount += 2;
+    }
+
+    // Filtro de tempo (sessões criadas há mais de X horas)
+    if (olderThanHours && olderThanHours > 0) {
+      conditions.push(
+        `created_at < NOW() - INTERVAL '${olderThanHours} hours'`
+      );
+    }
+
+    const query = `
+      UPDATE sessions_history 
+      SET status = 'closed', closed_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP
+      WHERE ${conditions.join(' AND ')}
+      RETURNING id
+    `;
+
+    const result = await db.query(query, values);
+    return result.rowCount || 0;
+  }
 }
 

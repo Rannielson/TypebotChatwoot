@@ -2,31 +2,28 @@ version: "3.8"
 
 services:
 
-
   ## --------------------------- API GERAL --------------------------- ##
   # API para rotas administrativas (auth, tenants, inboxes, sessions)
   typebot_connector_api:
-    build:
-      context: ..
-      dockerfile: docker/Dockerfile
+    image: rannielson/conectortypebot-backend:latest
     networks:
       - minha_rede
     command: node dist/index.js
     environment:
       NODE_ENV: production
       PORT: 3000
-      POSTGRES_HOST: postgres
+      POSTGRES_HOST: 37.27.106.75
       POSTGRES_PORT: 5432
       POSTGRES_DB: connectoratomos
       POSTGRES_USER: postgres
       POSTGRES_PASSWORD: 6a31b0c912e754caf48d965c5cae3490
-      REDIS_HOST: keydb
+      REDIS_HOST: 37.27.106.75
       REDIS_PORT: 6381
-      REDIS_PASSWORD: 
+      REDIS_PASSWORD:
       JWT_SECRET: 93ef200c1df5490c9606a2124240e790
       JWT_EXPIRES_IN: 24h
       CHATWOOT_DEFAULT_URL: https://chatconnect.cleoia.com.br
-      CHATWOOT_DEFAULT_TOKEN: 
+      CHATWOOT_DEFAULT_TOKEN:
       FRONTEND_URL: https://connect.atomos.tech
     volumes:
       - connector_logs:/app/logs
@@ -57,25 +54,23 @@ services:
   ## --------------------------- WEBHOOK API --------------------------- ##
   # API dedicada para receber webhooks (alta escalabilidade)
   typebot_connector_webhook:
-    build:
-      context: ..
-      dockerfile: docker/Dockerfile
+    image: rannielson/conectortypebot-backend:latest
     networks:
       - minha_rede
     command: node dist/webhook-server.js
     environment:
       NODE_ENV: production
       PORT: 3001
-      POSTGRES_HOST: postgres
+      POSTGRES_HOST: 37.27.106.75
       POSTGRES_PORT: 5432
       POSTGRES_DB: connectoratomos
       POSTGRES_USER: postgres
       POSTGRES_PASSWORD: 6a31b0c912e754caf48d965c5cae3490
-      REDIS_HOST: keydb
+      REDIS_HOST: 37.27.106.75
       REDIS_PORT: 6381
-      REDIS_PASSWORD: 
+      REDIS_PASSWORD:
       CHATWOOT_DEFAULT_URL: https://chatconnect.cleoia.com.br
-      CHATWOOT_DEFAULT_TOKEN: 
+      CHATWOOT_DEFAULT_TOKEN:
       WEBHOOK_JOB_CREATE_LOCK_TTL: 5000
     volumes:
       - connector_logs:/app/logs
@@ -110,24 +105,22 @@ services:
   ## --------------------------- WORKERS --------------------------- ##
   # Workers para processar jobs (webhook, log, chatwoot-note)
   typebot_connector_worker:
-    build:
-      context: ..
-      dockerfile: docker/Dockerfile
+    image: rannielson/conectortypebot-backend:latest
     networks:
       - minha_rede
     command: node dist/workers/index.js
     environment:
       NODE_ENV: production
-      POSTGRES_HOST: postgres
+      POSTGRES_HOST: 37.27.106.75
       POSTGRES_PORT: 5432
       POSTGRES_DB: connectoratomos
       POSTGRES_USER: postgres
       POSTGRES_PASSWORD: 6a31b0c912e754caf48d965c5cae3490
-      REDIS_HOST: keydb
+      REDIS_HOST: 37.27.106.75
       REDIS_PORT: 6381
-      REDIS_PASSWORD: 
+      REDIS_PASSWORD:
       CHATWOOT_DEFAULT_URL: https://chatconnect.cleoia.com.br
-      CHATWOOT_DEFAULT_TOKEN: 
+      CHATWOOT_DEFAULT_TOKEN:
       WEBHOOK_WORKER_CONCURRENCY: 50
       LOG_WORKER_CONCURRENCY: 20
       CHATWOOT_NOTE_WORKER_CONCURRENCY: 20
@@ -152,27 +145,25 @@ services:
         - io.portainer.accesscontrol.users=admin
         # Workers não expõem portas, apenas processam jobs
 
-  ## --------------------------- TRIGGER SCHEDULER --------------------------- ##
-  # Serviço dedicado para executar os schedulers de triggers (node-cron)
+        ## --------------------------- TRIGGER SCHEDULER --------------------------- ##
+        # Serviço dedicado para executar os schedulers de triggers (node-cron)
   typebot_connector_trigger_scheduler:
-    build:
-      context: ..
-      dockerfile: docker/Dockerfile
+    image: rannielson/conectortypebot-backend:latest
     networks:
       - minha_rede
     command: node dist/trigger-scheduler.js
     environment:
       NODE_ENV: production
-      POSTGRES_HOST: postgres
+      POSTGRES_HOST: 37.27.106.75
       POSTGRES_PORT: 5432
       POSTGRES_DB: connectoratomos
       POSTGRES_USER: postgres
       POSTGRES_PASSWORD: 6a31b0c912e754caf48d965c5cae3490
-      REDIS_HOST: keydb
+      REDIS_HOST: 37.27.106.75
       REDIS_PORT: 6381
-      REDIS_PASSWORD: 
+      REDIS_PASSWORD:
       CHATWOOT_DEFAULT_URL: https://chatconnect.cleoia.com.br
-      CHATWOOT_DEFAULT_TOKEN: 
+      CHATWOOT_DEFAULT_TOKEN:
     volumes:
       - connector_logs:/app/logs
     deploy:
@@ -194,16 +185,10 @@ services:
         # Trigger scheduler não expõe portas, apenas executa cron jobs
         # IMPORTANTE: Apenas 1 réplica é necessária para evitar execuções duplicadas
 
-  ## --------------------------- FRONTEND --------------------------- ##
-  # Frontend Next.js
+        ## --------------------------- FRONTEND --------------------------- ##
+        # Frontend Next.js
   typebot_connector_frontend:
-    build:
-      context: ../frontend
-      dockerfile: Dockerfile
-      target: runner-prod
-      args:
-        BUILD_ENV: production
-        NEXT_PUBLIC_API_URL: https://apiconnect.atomos.tech/api
+    image: rannielson/conectortypebot-frontend:latest
     networks:
       - minha_rede
     environment:
@@ -235,6 +220,7 @@ services:
 
 volumes:
   connector_logs:
+
 
 networks:
   minha_rede:
