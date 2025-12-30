@@ -23,7 +23,7 @@ services:
       JWT_EXPIRES_IN: ${JWT_EXPIRES_IN:-24h}
       CHATWOOT_DEFAULT_URL: ${CHATWOOT_DEFAULT_URL:-https://chatconnect.cleoia.com.br}
       CHATWOOT_DEFAULT_TOKEN: ${CHATWOOT_DEFAULT_TOKEN:-}
-      FRONTEND_URL: ${FRONTEND_URL:-http://localhost:3000}
+      FRONTEND_URL: ${FRONTEND_URL:-http://localhost:3001}
     expose:
       - "3000"
     volumes:
@@ -50,10 +50,17 @@ services:
       REDIS_HOST: 37.27.106.75
       REDIS_PORT: 6381
       REDIS_PASSWORD: ${REDIS_PASSWORD:-}
+      JWT_SECRET: ${JWT_SECRET:-93ef200c1df5490c9606a2124240e790}
+      JWT_EXPIRES_IN: ${JWT_EXPIRES_IN:-24h}
       CHATWOOT_DEFAULT_URL: ${CHATWOOT_DEFAULT_URL:-https://chatconnect.cleoia.com.br}
       CHATWOOT_DEFAULT_TOKEN: ${CHATWOOT_DEFAULT_TOKEN:-}
       # TTL do lock na criação do job (em ms, padrão: 5s)
       WEBHOOK_JOB_CREATE_LOCK_TTL: ${WEBHOOK_JOB_CREATE_LOCK_TTL:-5000}
+      # Timeout do buffer de mensagens (em ms, padrão: 3s)
+      # Agrupa mensagens recebidas em um período curto para evitar respostas duplicadas
+      MESSAGE_BUFFER_TIMEOUT_MS: ${MESSAGE_BUFFER_TIMEOUT_MS:-3000}
+      # Habilita buffer para todas as mensagens (true) ou apenas para mensagens com anexos (false)
+      USE_MESSAGE_BUFFER: ${USE_MESSAGE_BUFFER:-false}
     expose:
       - "${WEBHOOK_PORT:-3001}"
     volumes:
@@ -95,6 +102,8 @@ services:
       REDIS_HOST: 37.27.106.75
       REDIS_PORT: 6381
       REDIS_PASSWORD: ${REDIS_PASSWORD:-}
+      JWT_SECRET: ${JWT_SECRET:-93ef200c1df5490c9606a2124240e790}
+      JWT_EXPIRES_IN: ${JWT_EXPIRES_IN:-24h}
       CHATWOOT_DEFAULT_URL: ${CHATWOOT_DEFAULT_URL:-https://chatconnect.cleoia.com.br}
       CHATWOOT_DEFAULT_TOKEN: ${CHATWOOT_DEFAULT_TOKEN:-}
       # Configurações de concurrency dos workers (quantos jobs cada worker processa em paralelo)
@@ -104,6 +113,10 @@ services:
       CHATWOOT_NOTE_WORKER_CONCURRENCY: ${CHATWOOT_NOTE_WORKER_CONCURRENCY:-20}
       # TTL do lock para evitar reprocessamento (em ms, padrão: 60s)
       WEBHOOK_LOCK_TTL: ${WEBHOOK_LOCK_TTL:-60000}
+      # Timeout do buffer de mensagens (em ms, padrão: 3s)
+      MESSAGE_BUFFER_TIMEOUT_MS: ${MESSAGE_BUFFER_TIMEOUT_MS:-3000}
+      # Habilita buffer para todas as mensagens (true) ou apenas para mensagens com anexos (false)
+      USE_MESSAGE_BUFFER: ${USE_MESSAGE_BUFFER:-false}
     volumes:
       - ../logs:/app/logs
     restart: unless-stopped
@@ -129,6 +142,8 @@ services:
       REDIS_HOST: 37.27.106.75
       REDIS_PORT: 6381
       REDIS_PASSWORD: ${REDIS_PASSWORD:-}
+      JWT_SECRET: ${JWT_SECRET:-93ef200c1df5490c9606a2124240e790}
+      JWT_EXPIRES_IN: ${JWT_EXPIRES_IN:-24h}
       CHATWOOT_DEFAULT_URL: ${CHATWOOT_DEFAULT_URL:-https://chatconnect.cleoia.com.br}
       CHATWOOT_DEFAULT_TOKEN: ${CHATWOOT_DEFAULT_TOKEN:-}
     volumes:

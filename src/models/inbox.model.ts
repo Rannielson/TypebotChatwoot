@@ -15,6 +15,8 @@ export interface Inbox {
   is_active: boolean;
   is_test_mode: boolean;
   test_phone_number: string | null;
+  auto_close_minutes: number | null;
+  auto_close_bulk_interval_hours: number | null;
   created_at: Date;
   updated_at: Date;
 }
@@ -33,6 +35,8 @@ export interface CreateInboxData {
   is_active?: boolean;
   is_test_mode?: boolean;
   test_phone_number?: string;
+  auto_close_minutes?: number | null;
+  auto_close_bulk_interval_hours?: number | null;
 }
 
 export class InboxModel {
@@ -79,8 +83,8 @@ export class InboxModel {
         tenant_id, inbox_id, inbox_name, whatsapp_phone_number_id,
         whatsapp_access_token, whatsapp_api_version, typebot_base_url,
         typebot_api_key, typebot_public_id, chatwoot_api_token, is_active,
-        is_test_mode, test_phone_number
-      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13) RETURNING *`,
+        is_test_mode, test_phone_number, auto_close_minutes, auto_close_bulk_interval_hours
+      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15) RETURNING *`,
       [
         data.tenant_id,
         data.inbox_id,
@@ -95,6 +99,8 @@ export class InboxModel {
         data.is_active !== undefined ? data.is_active : true,
         data.is_test_mode !== undefined ? data.is_test_mode : false,
         data.test_phone_number || null,
+        data.auto_close_minutes !== undefined ? data.auto_close_minutes : null,
+        data.auto_close_bulk_interval_hours !== undefined ? data.auto_close_bulk_interval_hours : null,
       ]
     );
     return result.rows[0];
@@ -151,6 +157,14 @@ export class InboxModel {
     if (data.test_phone_number !== undefined) {
       fields.push(`test_phone_number = $${paramCount++}`);
       values.push(data.test_phone_number || null);
+    }
+    if (data.auto_close_minutes !== undefined) {
+      fields.push(`auto_close_minutes = $${paramCount++}`);
+      values.push(data.auto_close_minutes !== null && data.auto_close_minutes > 0 ? data.auto_close_minutes : null);
+    }
+    if (data.auto_close_bulk_interval_hours !== undefined) {
+      fields.push(`auto_close_bulk_interval_hours = $${paramCount++}`);
+      values.push(data.auto_close_bulk_interval_hours !== null && data.auto_close_bulk_interval_hours > 0 ? data.auto_close_bulk_interval_hours : null);
     }
 
     fields.push(`updated_at = CURRENT_TIMESTAMP`);

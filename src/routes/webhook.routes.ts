@@ -6,6 +6,7 @@ import { SessionService } from '../services/session.service';
 import { SessionModel } from '../models/session.model';
 import { CacheService } from '../services/cache.service';
 import { LockService } from '../services/lock.service';
+import { MessageBufferService } from '../services/message-buffer.service';
 
 const router = Router();
 
@@ -125,52 +126,80 @@ router.post('/chatwoot', async (req: Request, res: Response) => {
           }
         }
 
-        // Cria jobId único baseado no message_id para evitar duplicatas
-        const jobId = `msg-${normalizedMessage.inbox_id}-${normalizedMessage.message.message_id}`;
-        
-        // Lock na criação do job para evitar que múltiplas réplicas criem o mesmo job
-        // TTL curto (5s padrão) pois a criação do job é muito rápida
-        const lockKey = `job-create-${normalizedMessage.inbox_id}-${normalizedMessage.message.message_id}`;
-        const lockTtl = parseInt(process.env.WEBHOOK_JOB_CREATE_LOCK_TTL || '5000', 10);
-        const lock = await LockService.acquireLock(lockKey, lockTtl);
-        
-        if (!lock) {
-          // Outra réplica já está criando este job, retorna sucesso
-          const responseTime = Date.now() - startTime;
-          console.log(`[WebhookAPI] ⚠️ Job ${jobId} já está sendo criado por outra réplica (response: ${responseTime}ms)`);
-          return res.status(200).json({
-            success: true,
-            event: 'already_queued',
-            queued_at: new Date().toISOString(),
-            response_time_ms: responseTime,
-          });
-        }
+        // Verifica se deve usar buffer (mensagens com anexos ou múltiplas mensagens rápidas)
+        const hasAttachments = !!(normalizedMessage.attachments && normalizedMessage.attachments.length > 0);
+        const useBuffer = hasAttachments || process.env.USE_MESSAGE_BUFFER === 'true';
 
-        try {
-          // Adiciona job na fila de ALTA PRIORIDADE e responde imediatamente
-          // Se jobId já existe, não cria duplicata (comportamento padrão do BullMQ)
-          await webhookQueue.add(
-            'process-message',
-            { normalizedMessage },
-            {
-              priority: 1, // Prioridade máxima
-              jobId, // JobId único evita duplicatas
-              removeOnComplete: true,
-            }
+        if (useBuffer) {
+          // Adiciona mensagem ao buffer
+          const bufferResult = await MessageBufferService.addMessage(normalizedMessage);
+          
+          const responseTime = Date.now() - startTime;
+          console.log(
+            `[WebhookAPI] 📦 Mensagem adicionada ao buffer: ` +
+            `inbox=${normalizedMessage.inbox_id}, ` +
+            `conversation=${normalizedMessage.message.chat_id}, ` +
+            `bufferSize=${bufferResult.bufferSize} ` +
+            `(response: ${responseTime}ms)`
           );
-
-          // Resposta IMEDIATA ao Chatwoot (<50ms)
-          const responseTime = Date.now() - startTime;
-          console.log(`[WebhookAPI] ✅ Job criado: ${jobId} (response: ${responseTime}ms)`);
+          
           return res.status(200).json({
             success: true,
-            event: 'message_queued',
+            event: 'message_buffered',
+            buffered: bufferResult.buffered,
+            buffer_size: bufferResult.bufferSize,
             queued_at: new Date().toISOString(),
             response_time_ms: responseTime,
           });
-        } finally {
-          // Libera o lock após criar o job
-          await LockService.releaseLock(lock);
+        } else {
+          // Processa mensagem imediatamente (texto sem anexos)
+          // Cria jobId único baseado no message_id para evitar duplicatas
+          const jobId = `msg-${normalizedMessage.inbox_id}-${normalizedMessage.message.message_id}`;
+          
+          // Lock na criação do job para evitar que múltiplas réplicas criem o mesmo job
+          // TTL curto (5s padrão) pois a criação do job é muito rápida
+          const lockKey = `job-create-${normalizedMessage.inbox_id}-${normalizedMessage.message.message_id}`;
+          const lockTtl = parseInt(process.env.WEBHOOK_JOB_CREATE_LOCK_TTL || '5000', 10);
+          const lock = await LockService.acquireLock(lockKey, lockTtl);
+          
+          if (!lock) {
+            // Outra réplica já está criando este job, retorna sucesso
+            const responseTime = Date.now() - startTime;
+            console.log(`[WebhookAPI] ⚠️ Job ${jobId} já está sendo criado por outra réplica (response: ${responseTime}ms)`);
+            return res.status(200).json({
+              success: true,
+              event: 'already_queued',
+              queued_at: new Date().toISOString(),
+              response_time_ms: responseTime,
+            });
+          }
+
+          try {
+            // Adiciona job na fila de ALTA PRIORIDADE e responde imediatamente
+            // Se jobId já existe, não cria duplicata (comportamento padrão do BullMQ)
+            await webhookQueue.add(
+              'process-message',
+              { normalizedMessage },
+              {
+                priority: 1, // Prioridade máxima
+                jobId, // JobId único evita duplicatas
+                removeOnComplete: true,
+              }
+            );
+
+            // Resposta IMEDIATA ao Chatwoot (<50ms)
+            const responseTime = Date.now() - startTime;
+            console.log(`[WebhookAPI] ✅ Job criado: ${jobId} (response: ${responseTime}ms)`);
+            return res.status(200).json({
+              success: true,
+              event: 'message_queued',
+              queued_at: new Date().toISOString(),
+              response_time_ms: responseTime,
+            });
+          } finally {
+            // Libera o lock após criar o job
+            await LockService.releaseLock(lock);
+          }
         }
       }
 

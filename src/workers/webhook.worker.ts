@@ -11,11 +11,23 @@ const messageHandler = new MessageHandler();
 export const webhookWorker = new Worker(
   'webhook-processing',
   async (job: Job) => {
-    const { normalizedMessage } = job.data;
+    const { normalizedMessage, bufferedMessages, bufferSize } = job.data;
     const startTime = Date.now();
     
+    // Se há mensagens agrupadas do buffer, processa apenas a primeira
+    // Isso evita múltiplas respostas para múltiplas imagens/mensagens
+    const messageToProcess = normalizedMessage;
+    const isBuffered = !!(bufferedMessages && bufferSize && bufferSize > 1);
+    
+    if (isBuffered) {
+      console.log(
+        `[Worker] 📦 Processando mensagem agrupada do buffer: ` +
+        `${bufferSize} mensagem(ns) agrupadas, processando apenas a primeira`
+      );
+    }
+    
     // Cria chave única do lock baseada no message_id
-    const lockKey = `webhook-${normalizedMessage.inbox_id}-${normalizedMessage.message.message_id}`;
+    const lockKey = `webhook-${messageToProcess.inbox_id}-${messageToProcess.message.message_id}`;
     
     // Tenta adquirir lock (TTL configurável, padrão: 60s - tempo máximo de processamento)
     const lockTtl = parseInt(process.env.WEBHOOK_LOCK_TTL || '60000', 10);
@@ -33,19 +45,22 @@ export const webhookWorker = new Worker(
 
     try {
       // Busca inbox do cache (rápido)
-      const inbox = await CacheService.getInbox(normalizedMessage.inbox_id);
+      const inbox = await CacheService.getInbox(messageToProcess.inbox_id);
       if (!inbox) {
-        throw new Error(`Inbox ${normalizedMessage.inbox_id} não encontrado`);
+        throw new Error(`Inbox ${messageToProcess.inbox_id} não encontrado`);
       }
 
       // Processa mensagem (otimizado)
-      await messageHandler.handleMessage(normalizedMessage, inbox);
+      // Se há mensagens agrupadas, processa apenas a primeira para evitar múltiplas respostas
+      await messageHandler.handleMessage(messageToProcess, inbox);
       
       const processingTime = Date.now() - startTime;
       return { 
         success: true, 
         inboxId: inbox.id,
         processingTimeMs: processingTime,
+        buffered: isBuffered,
+        bufferSize: bufferSize || 1,
       };
     } catch (error: any) {
       console.error(`[Worker] Erro ao processar job ${job.id}:`, error);

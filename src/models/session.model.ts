@@ -456,6 +456,56 @@ export class SessionModel {
   }
 
   /**
+   * Busca sessões expiradas baseado em updated_at (última atividade)
+   * Útil para encerramento automático baseado em inatividade
+   * @param filters Filtros para buscar sessões expiradas
+   * @returns Array de sessões que estão expiradas
+   */
+  static async findExpiredByUpdatedAt(
+    filters: {
+      inboxId: number;
+      olderThanMinutes: number; // Sessões atualizadas há mais de X minutos
+      status?: 'active' | 'paused';
+    }
+  ): Promise<SessionHistory[]> {
+    const { inboxId, olderThanMinutes, status } = filters;
+    const conditions: string[] = [];
+    const values: any[] = [];
+    let paramCount = 1;
+
+    // Filtro obrigatório: inbox_id
+    conditions.push(`s.inbox_id = $${paramCount++}`);
+    values.push(inboxId);
+
+    // Filtro de status - apenas active e paused podem ser encerradas automaticamente
+    if (status) {
+      conditions.push(`s.status = $${paramCount++}`);
+      values.push(status);
+    } else {
+      conditions.push(`s.status IN ($${paramCount}, $${paramCount + 1})`);
+      values.push('active', 'paused');
+      paramCount += 2;
+    }
+
+    // Filtro de tempo baseado em updated_at (última atividade)
+    // Sessões que foram atualizadas há mais de X minutos
+    conditions.push(
+      `s.updated_at < NOW() - INTERVAL '${olderThanMinutes} minutes'`
+    );
+
+    const query = `
+      SELECT s.*, i.inbox_name 
+      FROM sessions_history s
+      LEFT JOIN inboxes i ON s.inbox_id = i.id
+      WHERE ${conditions.join(' AND ')}
+      ORDER BY s.updated_at ASC
+    `;
+
+    const result = await db.query(query, values);
+    return result.rows;
+  }
+
+  /**
    * Encerra sessões em massa com base em filtros
    * @param filters Filtros para encerrar sessões
    * @returns Número de sessões encerradas

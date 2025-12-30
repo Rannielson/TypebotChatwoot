@@ -60,6 +60,8 @@ router.post('/', async (req: Request, res: Response) => {
       is_active,
       is_test_mode,
       test_phone_number,
+      auto_close_minutes,
+      auto_close_bulk_interval_hours,
     } = req.body;
 
     if (
@@ -90,6 +92,8 @@ router.post('/', async (req: Request, res: Response) => {
       is_active,
       is_test_mode,
       test_phone_number,
+      auto_close_minutes,
+      auto_close_bulk_interval_hours,
     });
     res.status(201).json(inbox);
   } catch (error: any) {
@@ -111,6 +115,8 @@ router.put('/:id', async (req: Request, res: Response) => {
       is_active,
       is_test_mode,
       test_phone_number,
+      auto_close_minutes,
+      auto_close_bulk_interval_hours,
     } = req.body;
 
     const inbox = await InboxService.update(parseInt(req.params.id), {
@@ -125,6 +131,8 @@ router.put('/:id', async (req: Request, res: Response) => {
       is_active,
       is_test_mode,
       test_phone_number,
+      auto_close_minutes,
+      auto_close_bulk_interval_hours,
     });
     res.json(inbox);
   } catch (error: any) {

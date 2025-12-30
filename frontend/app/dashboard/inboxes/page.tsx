@@ -30,6 +30,8 @@ interface Inbox {
   is_active: boolean;
   is_test_mode?: boolean;
   test_phone_number?: string | null;
+  auto_close_minutes?: number | null;
+  auto_close_bulk_interval_hours?: number | null;
   created_at: string;
   updated_at: string;
 }
@@ -63,6 +65,8 @@ export default function InboxesPage() {
     is_active: "true",
     is_test_mode: "false",
     test_phone_number: "",
+    auto_close_minutes: "",
+    auto_close_bulk_interval_hours: "",
   });
 
   useEffect(() => {
@@ -107,6 +111,16 @@ export default function InboxesPage() {
         test_phone_number: formData.is_test_mode === "true" && formData.test_phone_number 
           ? formData.test_phone_number.trim() 
           : undefined,
+        auto_close_minutes: formData.auto_close_minutes 
+          ? parseInt(formData.auto_close_minutes) > 0 
+            ? parseInt(formData.auto_close_minutes) 
+            : null
+          : null,
+        auto_close_bulk_interval_hours: formData.auto_close_bulk_interval_hours 
+          ? parseInt(formData.auto_close_bulk_interval_hours) > 0 
+            ? parseInt(formData.auto_close_bulk_interval_hours) 
+            : null
+          : null,
       };
 
       if (editingInbox) {
@@ -151,6 +165,8 @@ export default function InboxesPage() {
       is_active: "true",
       is_test_mode: "false",
       test_phone_number: "",
+      auto_close_minutes: "",
+      auto_close_bulk_interval_hours: "",
     });
   };
 
@@ -170,6 +186,8 @@ export default function InboxesPage() {
       is_active: inbox.is_active.toString(),
       is_test_mode: (inbox.is_test_mode ?? false).toString(),
       test_phone_number: inbox.test_phone_number || "",
+      auto_close_minutes: inbox.auto_close_minutes?.toString() || "",
+      auto_close_bulk_interval_hours: inbox.auto_close_bulk_interval_hours?.toString() || "",
     });
     setShowForm(true);
   };
@@ -589,6 +607,52 @@ export default function InboxesPage() {
                     </div>
                   )}
                 </div>
+                <div className="space-y-2">
+                  <div>
+                    <Label htmlFor="auto_close_minutes">
+                      Encerramento Automático por Inatividade (minutos)
+                    </Label>
+                    <p className="text-xs text-muted-foreground mt-0.5">
+                      Encerra sessões automaticamente após X minutos sem atividade. Deixe vazio para desabilitar.
+                    </p>
+                  </div>
+                  <Input
+                    id="auto_close_minutes"
+                    type="number"
+                    min="0"
+                    value={formData.auto_close_minutes}
+                    onChange={(e) =>
+                      setFormData({
+                        ...formData,
+                        auto_close_minutes: e.target.value,
+                      })
+                    }
+                    placeholder="Ex: 30 (30 minutos)"
+                  />
+                </div>
+                <div className="space-y-2">
+                  <div>
+                    <Label htmlFor="auto_close_bulk_interval_hours">
+                      Encerramento em Massa Automático (horas)
+                    </Label>
+                    <p className="text-xs text-muted-foreground mt-0.5">
+                      Executa encerramento em massa de sessões antigas a cada X horas. Deixe vazio para desabilitar. Ex: 2 = a cada 2 horas, 24 = diariamente.
+                    </p>
+                  </div>
+                  <Input
+                    id="auto_close_bulk_interval_hours"
+                    type="number"
+                    min="0"
+                    value={formData.auto_close_bulk_interval_hours}
+                    onChange={(e) =>
+                      setFormData({
+                        ...formData,
+                        auto_close_bulk_interval_hours: e.target.value,
+                      })
+                    }
+                    placeholder="Ex: 2 (a cada 2 horas)"
+                  />
+                </div>
               </div>
               <Button type="submit">
                 {editingInbox ? "Atualizar" : "Criar"}
@@ -639,6 +703,22 @@ export default function InboxesPage() {
                         <span className="text-red-600">Inativo</span>
                       )}
                     </div>
+                    {inbox.auto_close_minutes && (
+                      <div>
+                        <span className="font-medium">Auto-Close:</span>{" "}
+                        <span className="text-blue-600">
+                          {inbox.auto_close_minutes} min
+                        </span>
+                      </div>
+                    )}
+                    {inbox.auto_close_bulk_interval_hours && (
+                      <div>
+                        <span className="font-medium">Bulk-Close:</span>{" "}
+                        <span className="text-purple-600">
+                          A cada {inbox.auto_close_bulk_interval_hours}h
+                        </span>
+                      </div>
+                    )}
                     <div className="flex flex-col gap-2 mt-4">
                       <div className="flex gap-2">
                         <Button

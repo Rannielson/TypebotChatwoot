@@ -3,6 +3,8 @@ import { db } from './config/database';
 import { redis } from './config/redis';
 import logger from './utils/logger.util';
 import { TriggerScheduler } from './schedulers/trigger.scheduler';
+import { SessionAutoCloseScheduler } from './schedulers/session-auto-close.scheduler';
+import { SessionBulkCloseScheduler } from './schedulers/session-bulk-close.scheduler';
 
 // Inicialização do Trigger Scheduler
 async function start() {
@@ -18,6 +20,14 @@ async function start() {
     // Inicia scheduler de triggers
     await TriggerScheduler.initialize();
     logger.info('Trigger scheduler initialized');
+    
+    // Inicia scheduler de encerramento automático de sessões
+    await SessionAutoCloseScheduler.initialize();
+    logger.info('Session auto-close scheduler initialized');
+    
+    // Inicia scheduler de encerramento em massa de sessões
+    await SessionBulkCloseScheduler.initialize();
+    logger.info('Session bulk-close scheduler initialized');
     
     console.log('⚡ Trigger Scheduler iniciado com sucesso');
     console.log('   - Verificando triggers ativos...');
@@ -54,6 +64,24 @@ async function start() {
     
     console.log('   - Verificação periódica ativa (a cada 1 minuto)');
     console.log('   - Novos triggers serão detectados automaticamente');
+    console.log('');
+    console.log('🔄 Session Auto-Close Scheduler iniciado com sucesso');
+    const sessionAutoCloseStatus = SessionAutoCloseScheduler.getStatus();
+    console.log(`   - Verificação de sessões expiradas a cada ${sessionAutoCloseStatus.checkIntervalMinutes} minuto(s)`);
+    console.log('   - Sessões serão encerradas automaticamente conforme configurado em cada inbox');
+    console.log('');
+    console.log('📦 Session Bulk-Close Scheduler iniciado com sucesso');
+    const bulkCloseStatus = SessionBulkCloseScheduler.getStatus();
+    console.log(`   - Intervalos agendados: ${bulkCloseStatus.activeJobs}`);
+    if (bulkCloseStatus.intervals.length > 0) {
+      console.log('   - Intervalos configurados:');
+      bulkCloseStatus.intervals.forEach((interval) => {
+        console.log(`     • ${interval.intervalHours}h: ${interval.inboxCount} inbox(es) (${interval.cronExpression})`);
+      });
+    } else {
+      console.log('   - Nenhum intervalo configurado ainda');
+      console.log('   - Configure auto_close_bulk_interval_hours nos inboxes para ativar');
+    }
   } catch (error) {
     logger.error('Failed to start trigger scheduler', { error });
     console.error('❌ Erro ao iniciar trigger scheduler:', error);
@@ -63,16 +91,20 @@ async function start() {
 
 // Graceful shutdown
 process.on('SIGTERM', async () => {
-  logger.info('SIGTERM received, shutting down trigger scheduler gracefully');
+  logger.info('SIGTERM received, shutting down schedulers gracefully');
   TriggerScheduler.stop();
+  SessionAutoCloseScheduler.stop();
+  SessionBulkCloseScheduler.stop();
   await redis.disconnect();
   await db.close();
   process.exit(0);
 });
 
 process.on('SIGINT', async () => {
-  logger.info('SIGINT received, shutting down trigger scheduler gracefully');
+  logger.info('SIGINT received, shutting down schedulers gracefully');
   TriggerScheduler.stop();
+  SessionAutoCloseScheduler.stop();
+  SessionBulkCloseScheduler.stop();
   await redis.disconnect();
   await db.close();
   process.exit(0);
