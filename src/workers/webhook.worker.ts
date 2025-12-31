@@ -3,6 +3,7 @@ import { queueConnection } from '../config/queue.config';
 import { MessageHandler } from '../handlers/message.handler';
 import { CacheService } from '../services/cache.service';
 import { LockService } from '../services/lock.service';
+import { MessageDeduplicationService } from '../services/message-deduplication.service';
 import { Inbox } from '../models/inbox.model';
 
 const messageHandler = new MessageHandler();
@@ -26,6 +27,22 @@ export const webhookWorker = new Worker(
       );
     }
     
+    // Verifica se mensagem já foi processada (deduplicação adicional no worker)
+    const alreadyProcessed = await MessageDeduplicationService.isAlreadyProcessed(messageToProcess);
+    if (alreadyProcessed) {
+      console.log(
+        `[Worker] ⚠️ Mensagem já processada anteriormente: ` +
+        `inbox=${messageToProcess.inbox_id}, ` +
+        `message_id=${messageToProcess.message.message_id}, ` +
+        `job=${job.id}`
+      );
+      return {
+        success: false,
+        skipped: true,
+        reason: 'already_processed',
+      };
+    }
+
     // Cria chave única do lock baseada no message_id
     const lockKey = `webhook-${messageToProcess.inbox_id}-${messageToProcess.message.message_id}`;
     
@@ -54,7 +71,13 @@ export const webhookWorker = new Worker(
       // Se há mensagens agrupadas, processa apenas a primeira para evitar múltiplas respostas
       await messageHandler.handleMessage(messageToProcess, inbox);
       
+      // Marca mensagem como processada APENAS DEPOIS de processar com sucesso
+      // Isso garante que se houver erro, a mensagem pode ser reprocessada
+      await MessageDeduplicationService.markAsProcessed(messageToProcess);
+      
       const processingTime = Date.now() - startTime;
+      console.log(`[Worker] ✅ Mensagem processada e marcada como processada: inbox=${messageToProcess.inbox_id}, message_id=${messageToProcess.message.message_id}`);
+      
       return { 
         success: true, 
         inboxId: inbox.id,
@@ -63,7 +86,8 @@ export const webhookWorker = new Worker(
         bufferSize: bufferSize || 1,
       };
     } catch (error: any) {
-      console.error(`[Worker] Erro ao processar job ${job.id}:`, error);
+      console.error(`[Worker] ❌ Erro ao processar job ${job.id}:`, error);
+      // Não marca como processada em caso de erro, permitindo reprocessamento
       throw error;
     } finally {
       // Sempre libera o lock, mesmo em caso de erro

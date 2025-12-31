@@ -996,9 +996,21 @@ export class ConversationTriggerService {
       const chatwootClient = new ChatwootClient(chatwootUrl, chatwootApiToken);
       const noteContent = formatWhatsAppMessageForChatwoot(whatsappMessage);
 
-      // Lógica: apenas texto usa mensagem comum (private: false)
-      // Imagens, listas e botões usam nota privada (private: true)
+      // IMPORTANTE: 
+      // - Mensagens de TEXTO são criadas como mensagens COMUNS (private: false) no Chatwoot
+      //   porque são enviadas APENAS pelo Chatwoot (não pela Meta API)
+      // - Mensagens de IMAGEM/INTERATIVAS são criadas como NOTAS PRIVADAS (private: true)
+      //   porque são enviadas pela Meta API e o Chatwoot apenas registra para histórico
+      // Notas privadas não disparam eventos de message_created no Chatwoot
       const isPrivate = whatsappMessage.type !== 'text';
+
+      const messageTypeLabel = isPrivate ? 'nota privada' : 'mensagem comum';
+      console.log(`[ConversationTriggerService] 📝 Criando ${messageTypeLabel} no Chatwoot:`, {
+        conversationId,
+        messageType: whatsappMessage.type,
+        contentPreview: noteContent.substring(0, 50),
+        isPrivate,
+      });
 
       await chatwootClient.createMessage(
         accountId,
@@ -1007,8 +1019,7 @@ export class ConversationTriggerService {
         isPrivate
       );
     } catch (error: any) {
-      const messageType = whatsappMessage.type === 'text' ? 'mensagem comum' : 'nota privada';
-      console.error(`[ConversationTriggerService] Erro ao criar ${messageType} no Chatwoot:`, error);
+      console.error(`[ConversationTriggerService] Erro ao criar nota privada no Chatwoot:`, error);
       // Não lança erro para não interromper o fluxo principal
     }
   }

@@ -56,6 +56,33 @@ class RedisClient {
     }
   }
 
+  /**
+   * SET com NX (only if Not eXists) - retorna true se criou, false se já existia
+   * Útil para operações atômicas de deduplicação
+   */
+  async setNX(key: string, value: string, ttlSeconds?: number): Promise<boolean> {
+    try {
+      await this.connect();
+      if (ttlSeconds) {
+        // SET key value NX EX ttlSeconds
+        const result = await this.client.set(key, value, {
+          NX: true,
+          EX: ttlSeconds,
+        });
+        return result === 'OK';
+      } else {
+        // SET key value NX
+        const result = await this.client.set(key, value, {
+          NX: true,
+        });
+        return result === 'OK';
+      }
+    } catch (error) {
+      console.error('Redis SETNX error', { key, error });
+      throw error;
+    }
+  }
+
   async del(key: string): Promise<void> {
     try {
       await this.connect();

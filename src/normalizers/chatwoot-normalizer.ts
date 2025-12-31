@@ -155,11 +155,29 @@ export class ChatwootNormalizer {
 
     if (rawWebhook.body.event === 'automation_event.message_created') {
       if (!rawWebhook.body.messages || rawWebhook.body.messages.length === 0) {
+        console.log('[Normalizer] ❌ Webhook inválido: sem mensagens');
         return false;
       }
 
       const message = rawWebhook.body.messages[0];
+      
+      // Log detalhado para debug
+      console.log('[Normalizer] 🔍 Verificando mensagem:', {
+        message_id: message.id,
+        message_type: message.message_type,
+        message_type_description: message.message_type === 0 ? 'incoming' : message.message_type === 1 ? 'outgoing' : 'unknown',
+        content: message.content?.substring(0, 50),
+        hasAttachments: !!(message.attachments && message.attachments.length > 0),
+        sender: message.sender,
+      });
+
+      // message_type === 1 significa mensagem de saída (enviada pelo Chatwoot/Meta)
+      // message_type === 0 significa mensagem de entrada (recebida do usuário)
       if (message.message_type === 1) {
+        console.log('[Normalizer] ⏭️ Mensagem de saída ignorada (message_type=1):', {
+          message_id: message.id,
+          content: message.content?.substring(0, 50),
+        });
         return false;
       }
 
@@ -167,8 +185,16 @@ export class ChatwootNormalizer {
         !message.content &&
         (!message.attachments || message.attachments.length === 0)
       ) {
+        console.log('[Normalizer] ❌ Mensagem sem conteúdo nem anexos');
         return false;
       }
+
+      console.log('[Normalizer] ✅ Mensagem válida (incoming):', {
+        message_id: message.id,
+        message_type: message.message_type,
+        hasContent: !!message.content,
+        hasAttachments: !!(message.attachments && message.attachments.length > 0),
+      });
 
       return true;
     }

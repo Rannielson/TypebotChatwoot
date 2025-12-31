@@ -472,13 +472,34 @@ export class MessageHandler {
       phoneNumber
     );
 
+    console.log(`[MessageHandler] 📤 Mensagens WhatsApp geradas: ${whatsappMessages.length}`);
+    whatsappMessages.forEach((msg, idx) => {
+      const content = msg.type === 'text' 
+        ? msg.text.body.substring(0, 100) 
+        : msg.type === 'image' 
+        ? `[Imagem: ${msg.image.link}]`
+        : msg.type === 'interactive'
+        ? `[Interativa: ${msg.interactive.type}]`
+        : '[Desconhecido]';
+      console.log(`[MessageHandler]   ${idx + 1}. Tipo: ${msg.type}, Conteúdo: ${content}`);
+    });
+
+    // Deduplicação de mensagens WhatsApp antes de enviar
+    const uniqueMessages = this.deduplicateWhatsAppMessages(whatsappMessages);
+    if (uniqueMessages.length < whatsappMessages.length) {
+      console.log(
+        `[MessageHandler] ⚠️ Removidas ${whatsappMessages.length - uniqueMessages.length} mensagem(ns) duplicada(s). ` +
+        `Enviando ${uniqueMessages.length} mensagem(ns) única(s).`
+      );
+    }
+
     // Processa clientSideActions para extrair wait (pega apenas o primeiro)
     const waitDelayMs = this.extractWaitDelay(typebotResponse);
     
     if (waitDelayMs > 0) {
       console.log(
         `[MessageHandler] ⏱️ Wait detectado: ${waitDelayMs}ms (${waitDelayMs / 1000}s). ` +
-        `Aplicando entre cada uma das ${whatsappMessages.length} mensagem(ns)...`
+        `Aplicando entre cada uma das ${uniqueMessages.length} mensagem(ns)...`
       );
     } else {
       console.log(
@@ -487,8 +508,8 @@ export class MessageHandler {
     }
 
     // Envia mensagens para WhatsApp
-    for (let i = 0; i < whatsappMessages.length; i++) {
-      const whatsappMessage = whatsappMessages[i];
+    for (let i = 0; i < uniqueMessages.length; i++) {
+      const whatsappMessage = uniqueMessages[i];
       
       // Aplica delay ANTES de enviar a mensagem (exceto a primeira)
       if (i > 0) {
@@ -496,23 +517,41 @@ export class MessageHandler {
         const delayToApply = waitDelayMs > 0 ? waitDelayMs : 500;
         
         console.log(
-          `[MessageHandler] ⏳ Aguardando ${delayToApply}ms (${delayToApply / 1000}s) antes de enviar mensagem ${i + 1}/${whatsappMessages.length}`
+          `[MessageHandler] ⏳ Aguardando ${delayToApply}ms (${delayToApply / 1000}s) antes de enviar mensagem ${i + 1}/${uniqueMessages.length}`
         );
         await this.delay(delayToApply);
       }
 
-      const response = await this.sendWhatsAppMessage(
-        whatsappMessage,
-        whatsappClient
-      );
+      // IMPORTANTE: Mensagens de texto simples são enviadas APENAS pelo Chatwoot, não pela Meta API
+      // Isso evita duplicação de mensagens. Outros tipos (imagens, interativas) continuam pela Meta.
+      let response: any = null;
+      
+      if (whatsappMessage.type === 'text') {
+        console.log(
+          `[MessageHandler] 📝 Mensagem de texto detectada. Enviando APENAS pelo Chatwoot (não pela Meta API)`
+        );
+        // Não envia pela Meta API para mensagens de texto
+        // A mensagem será enviada apenas pelo Chatwoot via createChatwootMessage abaixo
+        response = { messages: [{ id: 'chatwoot-only' }] }; // Placeholder para logs
+      } else {
+        // Outros tipos (imagens, interativas) continuam sendo enviados pela Meta API
+        console.log(
+          `[MessageHandler] 📤 Mensagem ${whatsappMessage.type} detectada. Enviando pela Meta API`
+        );
+        response = await this.sendWhatsAppMessage(
+          whatsappMessage,
+          whatsappClient
+        );
+      }
 
-      // Notas do Chatwoot assíncronas (não bloqueiam)
-      chatwootNoteQueue.add('create-note', {
+      // Envia mensagem pelo Chatwoot (para texto: mensagem comum, para outros: nota privada)
+      // IMPORTANTE: Mensagens de texto são enviadas APENAS pelo Chatwoot
+      await this.createChatwootMessage(
         tenant,
         inbox,
         conversationId,
-        whatsappMessage,
-      });
+        whatsappMessage
+      );
 
       // Log assíncrono
       if (dbSessionId) {
@@ -631,9 +670,22 @@ export class MessageHandler {
     );
 
     for (const whatsappMessage of whatsappMessages) {
-      await this.sendWhatsAppMessage(whatsappMessage, whatsappClient);
+      // IMPORTANTE: Mensagens de texto simples são enviadas APENAS pelo Chatwoot, não pela Meta API
+      // Isso evita duplicação de mensagens. Outros tipos (imagens, interativas) continuam pela Meta.
+      if (whatsappMessage.type === 'text') {
+        console.log(
+          `[MessageHandler] 📝 Mensagem de texto detectada em handleButtonResponse. Enviando APENAS pelo Chatwoot (não pela Meta API)`
+        );
+      } else {
+        // Outros tipos (imagens, interativas) continuam sendo enviados pela Meta API
+        console.log(
+          `[MessageHandler] 📤 Mensagem ${whatsappMessage.type} detectada em handleButtonResponse. Enviando pela Meta API`
+        );
+        await this.sendWhatsAppMessage(whatsappMessage, whatsappClient);
+      }
       
       // Cria mensagem no Chatwoot (comum para texto, privada para imagens/listas/botões)
+      // IMPORTANTE: Mensagens de texto são enviadas APENAS pelo Chatwoot
       await this.createChatwootMessage(
         tenant,
         inbox,
@@ -755,9 +807,21 @@ export class MessageHandler {
       const chatwootClient = new ChatwootClient(chatwootUrl, chatwootApiToken);
       const noteContent = formatWhatsAppMessageForChatwoot(whatsappMessage);
 
-      // Lógica: apenas texto usa mensagem comum (private: false)
-      // Imagens, listas e botões usam nota privada (private: true)
+      // IMPORTANTE: 
+      // - Mensagens de TEXTO são criadas como mensagens COMUNS (private: false) no Chatwoot
+      //   porque são enviadas APENAS pelo Chatwoot (não pela Meta API)
+      // - Mensagens de IMAGEM/INTERATIVAS são criadas como NOTAS PRIVADAS (private: true)
+      //   porque são enviadas pela Meta API e o Chatwoot apenas registra para histórico
+      // Notas privadas não disparam eventos de message_created no Chatwoot
       const isPrivate = whatsappMessage.type !== 'text';
+
+      const messageTypeLabel = isPrivate ? 'nota privada' : 'mensagem comum';
+      console.log(`[MessageHandler] 📝 Criando ${messageTypeLabel} no Chatwoot:`, {
+        conversationId,
+        messageType: whatsappMessage.type,
+        contentPreview: noteContent.substring(0, 50),
+        isPrivate,
+      });
 
       await chatwootClient.createMessage(
         accountId,
@@ -906,6 +970,46 @@ export class MessageHandler {
     }
 
     return 0;
+  }
+
+  /**
+   * Remove mensagens WhatsApp duplicadas baseado no conteúdo
+   * Compara mensagens de texto pelo conteúdo, outras pelo tipo e identificadores únicos
+   */
+  private deduplicateWhatsAppMessages(messages: any[]): any[] {
+    const seen = new Set<string>();
+    const unique: any[] = [];
+
+    for (const msg of messages) {
+      let key: string;
+
+      if (msg.type === 'text') {
+        // Para texto, usa o conteúdo como chave
+        key = `text:${msg.text.body}`;
+      } else if (msg.type === 'image') {
+        // Para imagem, usa a URL
+        key = `image:${msg.image.link}`;
+      } else if (msg.type === 'interactive') {
+        // Para interativas, usa tipo + body text como chave
+        const bodyText = msg.interactive.body?.text || '';
+        key = `interactive:${msg.interactive.type}:${bodyText}`;
+      } else {
+        // Para outros tipos, usa tipo + JSON stringificado
+        key = `${msg.type}:${JSON.stringify(msg)}`;
+      }
+
+      if (!seen.has(key)) {
+        seen.add(key);
+        unique.push(msg);
+      } else {
+        console.log(`[MessageHandler] 🔍 Mensagem duplicada detectada e removida:`, {
+          type: msg.type,
+          content: msg.type === 'text' ? msg.text.body.substring(0, 50) : '[não-texto]',
+        });
+      }
+    }
+
+    return unique;
   }
 
   private delay(ms: number): Promise<void> {

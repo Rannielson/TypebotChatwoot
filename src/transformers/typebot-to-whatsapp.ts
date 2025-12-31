@@ -468,6 +468,15 @@ export function transformTypebotResponseToWhatsApp(
 ): WhatsAppMessage[] {
   const whatsappMessages: WhatsAppMessage[] = [];
 
+  console.log(`[TypebotToWhatsApp] 🔍 Transformando resposta do Typebot:`, {
+    messagesCount: typebotResponse.messages?.length || 0,
+    hasInput: !!typebotResponse.input,
+    inputType: typebotResponse.input?.type,
+    choiceItemsCount: typebotResponse.input?.type === 'choice input' 
+      ? (typebotResponse.input as TypebotChoiceInput).items.length 
+      : 0,
+  });
+
   if (typebotResponse.messages && typebotResponse.messages.length > 0) {
     // Separa mensagens de texto e imagem
     const textMessages = typebotResponse.messages.filter(
@@ -476,6 +485,13 @@ export function transformTypebotResponseToWhatsApp(
     const imageMessages = typebotResponse.messages.filter(
       (msg): msg is TypebotImageMessage => msg.type === 'image'
     );
+
+    console.log(`[TypebotToWhatsApp] 📋 Mensagens do Typebot:`, {
+      total: typebotResponse.messages.length,
+      text: textMessages.length,
+      image: imageMessages.length,
+      other: typebotResponse.messages.length - textMessages.length - imageMessages.length,
+    });
 
     // Para interactive list, não envia mensagens de texto separadamente
   // pois elas serão usadas como header, body, footer e button text
@@ -487,6 +503,12 @@ export function transformTypebotResponseToWhatsApp(
 
   if (!shouldSkipTextMessages && textMessages.length > 0) {
     const transformedTextMessages = transformTextMessages(textMessages, to);
+    console.log(`[TypebotToWhatsApp] 📤 Adicionando ${transformedTextMessages.length} mensagem(ns) de texto:`, 
+      transformedTextMessages.map(m => ({
+        type: m.type,
+        content: m.text.body.substring(0, 50),
+      }))
+    );
     whatsappMessages.push(...transformedTextMessages);
   }
 
@@ -526,6 +548,12 @@ export function transformTypebotResponseToWhatsApp(
       }
     }
   }
+
+  console.log(`[TypebotToWhatsApp] ✅ Total de mensagens WhatsApp geradas: ${whatsappMessages.length}`, {
+    text: whatsappMessages.filter(m => m.type === 'text').length,
+    image: whatsappMessages.filter(m => m.type === 'image').length,
+    interactive: whatsappMessages.filter(m => m.type === 'interactive').length,
+  });
 
   return whatsappMessages;
 }

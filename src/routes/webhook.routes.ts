@@ -7,6 +7,7 @@ import { SessionModel } from '../models/session.model';
 import { CacheService } from '../services/cache.service';
 import { LockService } from '../services/lock.service';
 import { MessageBufferService } from '../services/message-buffer.service';
+import { MessageDeduplicationService } from '../services/message-deduplication.service';
 
 const router = Router();
 
@@ -14,6 +15,20 @@ router.post('/chatwoot', async (req: Request, res: Response) => {
   const startTime = Date.now();
   
   try {
+    // Log do webhook recebido para debug
+    console.log('[WebhookAPI] 📥 Webhook recebido:', {
+      event: req.body.event || req.body.body?.event,
+      hasMessages: !!(req.body.messages || req.body.body?.messages),
+      messageCount: req.body.messages?.length || req.body.body?.messages?.length || 0,
+      message_type: req.body.messages?.[0]?.message_type || req.body.body?.messages?.[0]?.message_type,
+      message_id: req.body.messages?.[0]?.id || req.body.body?.messages?.[0]?.id,
+      headers: {
+        'user-agent': req.headers['user-agent'],
+        'x-forwarded-for': req.headers['x-forwarded-for'],
+        'host': req.headers['host'],
+      },
+    });
+
     // Validação rápida (sem logs excessivos em produção)
     // Log apenas para debug - remover em produção para performance
     let rawWebhook: ChatwootRawWebhook;
@@ -30,6 +45,7 @@ router.post('/chatwoot', async (req: Request, res: Response) => {
         executionMode: req.body.executionMode,
       };
     } else {
+      console.log('[WebhookAPI] ❌ Estrutura de payload inválida');
       return res.status(400).json({
         success: false,
         error: 'Estrutura de payload inválida',
@@ -37,6 +53,8 @@ router.post('/chatwoot', async (req: Request, res: Response) => {
     }
 
     if (!ChatwootNormalizer.isValid(rawWebhook)) {
+      const responseTime = Date.now() - startTime;
+      console.log(`[WebhookAPI] ❌ Webhook inválido ou mensagem de saída (response: ${responseTime}ms)`);
       return res.status(400).json({
         success: false,
         error: 'Webhook inválido ou mensagem de saída',
@@ -125,6 +143,42 @@ router.post('/chatwoot', async (req: Request, res: Response) => {
             console.log(`[WebhookAPI] ✅ Sessão retomada (${resumedCount} sessões retomadas)`);
           }
         }
+
+        // Verifica se mensagem já foi processada (deduplicação)
+        // IMPORTANTE: Apenas verifica, não marca ainda (marcação acontece no worker após processar com sucesso)
+        console.log(`[WebhookAPI] 🔍 Verificando deduplicação:`, {
+          inbox_id: normalizedMessage.inbox_id,
+          message_id: normalizedMessage.message.message_id,
+          conversation_id: normalizedMessage.message.chat_id,
+          phone: normalizedMessage.message.remotejid,
+        });
+        
+        const alreadyProcessed = await MessageDeduplicationService.isAlreadyProcessed(normalizedMessage);
+        
+        console.log(`[WebhookAPI] 🔍 Resultado da verificação de deduplicação:`, {
+          alreadyProcessed,
+          inbox_id: normalizedMessage.inbox_id,
+          message_id: normalizedMessage.message.message_id,
+        });
+        
+        if (alreadyProcessed) {
+          const responseTime = Date.now() - startTime;
+          console.log(
+            `[WebhookAPI] ⚠️⚠️⚠️ DUPLICATA DETECTADA - Mensagem já processada anteriormente: ` +
+            `inbox=${normalizedMessage.inbox_id}, ` +
+            `message_id=${normalizedMessage.message.message_id} ` +
+            `(response: ${responseTime}ms)`
+          );
+          return res.status(200).json({
+            success: true,
+            event: 'already_processed',
+            message: 'Mensagem já foi processada anteriormente',
+            queued_at: new Date().toISOString(),
+            response_time_ms: responseTime,
+          });
+        }
+        
+        console.log(`[WebhookAPI] ✅ Mensagem nova, prosseguindo com processamento`);
 
         // Verifica se deve usar buffer (mensagens com anexos ou múltiplas mensagens rápidas)
         const hasAttachments = !!(normalizedMessage.attachments && normalizedMessage.attachments.length > 0);
