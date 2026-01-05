@@ -69,30 +69,108 @@ export function transformImageMessages(
     .map((msg) => {
       // Se tem clickLink, transforma em mensagem interativa com CTA
       if (msg.content.clickLink?.url) {
-        // Usa o título do alt se disponível, senão usa "Abrir Link" como fallback
-        const buttonTitle = msg.content.clickLink.alt || 'Abrir Link';
+        // Nome do botão sempre "Clique aqui" (padrão)
+        const buttonTitle = 'Clique aqui';
         
         // Busca texto de mensagens anteriores para usar como body
         let bodyText = 'Clique no botão para abrir o link'; // Texto padrão (Meta API requer pelo menos 1 caractere válido)
+        let extractedUrl: string | null = null;
+        
         if (allMessages) {
           // Encontra a posição da imagem atual
           const imageIndex = allMessages.findIndex(m => m.id === msg.id);
+          
+          console.log('[TypebotToWhatsApp] 🔍 Buscando texto com "https:" em todas as mensagens:', {
+            totalMessages: allMessages.length,
+            imageId: msg.id,
+            imageIndex,
+            allTextMessages: allMessages
+              .filter(m => m.type === 'text')
+              .map((m, idx) => {
+                const textMsg = m as TypebotTextMessage;
+                const extractedText = extractTextFromRichText(textMsg.content.richText);
+                return {
+                  index: allMessages.indexOf(m),
+                  messageId: textMsg.id,
+                  preview: extractedText.substring(0, 100),
+                  hasHttps: extractedText.toLowerCase().includes('https:'),
+                };
+              }),
+          });
+          
+          // Busca em TODAS as mensagens de texto (não apenas nas anteriores)
+          // Prioriza mensagens antes da imagem, mas se não encontrar, busca em todas
+          let foundText = false;
+          
+          // Primeiro, tenta encontrar nas mensagens antes da imagem (se houver)
           if (imageIndex > 0) {
-            // Busca a última mensagem de texto antes desta imagem
             for (let i = imageIndex - 1; i >= 0; i--) {
               if (allMessages[i].type === 'text') {
                 const textMsg = allMessages[i] as TypebotTextMessage;
                 const extractedText = extractTextFromRichText(textMsg.content.richText);
-                if (extractedText.trim()) {
-                  bodyText = extractedText;
+                
+                if (extractedText.trim() && extractedText.toLowerCase().includes('https:')) {
+                  const httpsIndex = extractedText.toLowerCase().indexOf('https:');
+                  bodyText = extractedText.substring(0, httpsIndex).trim();
+                  extractedUrl = extractedText.substring(httpsIndex).trim();
+                  foundText = true;
+                  
+                  console.log('[TypebotToWhatsApp] ✅ URL encontrada no texto (antes da imagem):', {
+                    bodyText: bodyText,
+                    extractedUrl: extractedUrl,
+                    originalText: extractedText,
+                  });
                   break;
                 }
               }
             }
           }
+          
+          // Se não encontrou antes da imagem, busca em TODAS as mensagens de texto
+          if (!foundText) {
+            for (let i = 0; i < allMessages.length; i++) {
+              if (allMessages[i].type === 'text') {
+                const textMsg = allMessages[i] as TypebotTextMessage;
+                const extractedText = extractTextFromRichText(textMsg.content.richText);
+                
+                console.log('[TypebotToWhatsApp] 🔍 Verificando mensagem de texto:', {
+                  index: i,
+                  messageId: textMsg.id,
+                  extractedText: extractedText.substring(0, 150),
+                  hasHttps: extractedText.toLowerCase().includes('https:'),
+                });
+                
+                if (extractedText.trim() && extractedText.toLowerCase().includes('https:')) {
+                  const httpsIndex = extractedText.toLowerCase().indexOf('https:');
+                  bodyText = extractedText.substring(0, httpsIndex).trim();
+                  extractedUrl = extractedText.substring(httpsIndex).trim();
+                  foundText = true;
+                  
+                  console.log('[TypebotToWhatsApp] ✅ URL encontrada no texto (em todas as mensagens):', {
+                    bodyText: bodyText,
+                    extractedUrl: extractedUrl,
+                    originalText: extractedText,
+                  });
+                  break;
+                }
+              }
+            }
+          }
+          
+          if (!foundText) {
+            console.log('[TypebotToWhatsApp] ⚠️ Nenhuma mensagem de texto com "https:" encontrada');
+          }
+        } else {
+          console.log('[TypebotToWhatsApp] ⚠️ allMessages não foi fornecido');
         }
         
+        // Se extraiu URL do texto e ela é válida, usa ela (ou valida se bate com clickLink.url)
+        const finalCtaUrl = extractedUrl && extractedUrl.startsWith('https://') 
+          ? extractedUrl 
+          : msg.content.clickLink.url;
+        
         // Garante que bodyText não seja vazio (Meta API requer pelo menos 1 caractere válido)
+        // Se não encontrou texto antes de "https:", usa o texto padrão
         const normalizedBodyText = bodyText.trim() || 'Clique no botão para abrir o link';
         
         // Validações antes de criar a mensagem
@@ -101,7 +179,7 @@ export function transformImageMessages(
           throw new Error('URL da imagem é obrigatória para mensagem interativa CTA URL');
         }
         
-        if (!msg.content.clickLink.url || msg.content.clickLink.url.trim() === '') {
+        if (!finalCtaUrl || finalCtaUrl.trim() === '') {
           console.error('[TypebotToWhatsApp] ❌ Erro: URL do CTA está ausente ou vazia');
           throw new Error('URL do CTA é obrigatória para mensagem interativa CTA URL');
         }
@@ -113,10 +191,11 @@ export function transformImageMessages(
         
         console.log('[TypebotToWhatsApp] ✅ Criando mensagem interativa CTA URL:', {
           imageUrl: msg.content.url.substring(0, 50),
-          ctaUrl: msg.content.clickLink.url.substring(0, 50),
+          ctaUrl: finalCtaUrl.substring(0, 50),
           buttonTitle: buttonTitle,
           bodyTextLength: normalizedBodyText.length,
           bodyTextPreview: normalizedBodyText.substring(0, 50),
+          urlSource: extractedUrl ? 'extraída do texto' : 'do clickLink',
         });
         
         return {
@@ -139,7 +218,7 @@ export function transformImageMessages(
               name: 'cta_url',
               parameters: {
                 display_text: buttonTitle.trim().substring(0, 20), // Limita a 20 caracteres (limite do WhatsApp)
-                url: msg.content.clickLink.url.trim(),
+                url: finalCtaUrl.trim(),
               },
             },
           },
