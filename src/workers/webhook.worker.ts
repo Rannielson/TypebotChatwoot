@@ -42,7 +42,7 @@ export const webhookWorker = new Worker(
         reason: 'already_processed',
       };
     }
-
+    
     // Cria chave única do lock baseada no message_id
     const lockKey = `webhook-${messageToProcess.inbox_id}-${messageToProcess.message.message_id}`;
     

@@ -900,13 +900,48 @@ export class ConversationTriggerService {
       } else if (message.type === 'interactive') {
         // Verifica se é mensagem interativa com CTA URL (tipo cta_url)
         if (message.interactive.type === 'cta_url') {
+          // Validação e logs detalhados antes de enviar
+          const imageUrl = message.interactive.header?.image?.link;
+          const ctaUrl = message.interactive.action?.parameters?.url;
+          const bodyText = message.interactive.body?.text;
+          const buttonTitle = message.interactive.action?.parameters?.display_text;
+          const footerText = message.interactive.footer?.text;
+
+          console.log('[ConversationTriggerService] 🔍 Validando mensagem interativa CTA URL:', {
+            to: message.to,
+            hasImageUrl: !!imageUrl,
+            imageUrl: imageUrl?.substring(0, 50),
+            hasCtaUrl: !!ctaUrl,
+            ctaUrl: ctaUrl?.substring(0, 50),
+            hasBodyText: !!bodyText,
+            bodyTextLength: bodyText?.length || 0,
+            bodyTextPreview: bodyText?.substring(0, 50),
+            hasButtonTitle: !!buttonTitle,
+            buttonTitle: buttonTitle,
+            hasFooterText: !!footerText,
+          });
+
+          // Validações antes de enviar
+          if (!imageUrl) {
+            throw new Error('Mensagem interativa CTA URL: header.image.link está ausente');
+          }
+          if (!ctaUrl) {
+            throw new Error('Mensagem interativa CTA URL: action.parameters.url está ausente');
+          }
+          if (!bodyText || bodyText.trim() === '') {
+            throw new Error('Mensagem interativa CTA URL: body.text está ausente ou vazio');
+          }
+          if (!buttonTitle) {
+            throw new Error('Mensagem interativa CTA URL: action.parameters.display_text está ausente');
+          }
+
           return await whatsappClient.sendInteractiveCTAImage(
             message.to,
-            message.interactive.header.image.link,
-            message.interactive.action.parameters.url,
-            message.interactive.body.text,
-            message.interactive.action.parameters.display_text,
-            message.interactive.footer?.text
+            imageUrl,
+            ctaUrl,
+            bodyText,
+            buttonTitle,
+            footerText
           );
         }
         

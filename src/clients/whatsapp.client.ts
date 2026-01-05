@@ -80,32 +80,55 @@ export class WhatsAppClient {
     buttonTitle: string = 'Abrir Link',
     footerText?: string
   ): Promise<WhatsAppApiResponse> {
+    // Validações de parâmetros obrigatórios
+    if (!to || typeof to !== 'string' || to.trim() === '') {
+      throw new Error('Parâmetro obrigatório "to" está ausente ou inválido');
+    }
+    
+    if (!imageUrl || typeof imageUrl !== 'string' || imageUrl.trim() === '') {
+      throw new Error('Parâmetro obrigatório "imageUrl" está ausente ou inválido');
+    }
+    
+    if (!ctaUrl || typeof ctaUrl !== 'string' || ctaUrl.trim() === '') {
+      throw new Error('Parâmetro obrigatório "ctaUrl" está ausente ou inválido');
+    }
+    
+    if (!buttonTitle || typeof buttonTitle !== 'string' || buttonTitle.trim() === '') {
+      throw new Error('Parâmetro obrigatório "buttonTitle" está ausente ou inválido');
+    }
+    
+    // Garante que bodyText não seja vazio (Meta API requer pelo menos 1 caractere válido)
+    const normalizedBodyText = (bodyText || ' ').trim();
+    if (normalizedBodyText === '') {
+      throw new Error('Parâmetro obrigatório "bodyText" não pode ser vazio');
+    }
+
     const message: WhatsAppInteractiveCTAImageMessage = {
       messaging_product: 'whatsapp',
       recipient_type: 'individual',
-      to,
+      to: to.trim(),
       type: 'interactive',
       interactive: {
         type: 'cta_url',
         header: {
           type: 'image',
           image: {
-            link: imageUrl,
+            link: imageUrl.trim(),
           },
         },
         body: {
-          text: bodyText,
+          text: normalizedBodyText.substring(0, 1024), // Limita a 1024 caracteres
         },
-        ...(footerText && {
+        ...(footerText && footerText.trim() && {
           footer: {
-            text: footerText,
+            text: footerText.trim().substring(0, 60), // Limita a 60 caracteres
           },
         }),
         action: {
           name: 'cta_url',
           parameters: {
-            display_text: buttonTitle.substring(0, 20),
-            url: ctaUrl,
+            display_text: buttonTitle.trim().substring(0, 20), // Limita a 20 caracteres
+            url: ctaUrl.trim(),
           },
         },
       },

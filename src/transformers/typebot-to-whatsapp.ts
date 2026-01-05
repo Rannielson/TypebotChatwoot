@@ -73,7 +73,7 @@ export function transformImageMessages(
         const buttonTitle = msg.content.clickLink.alt || 'Abrir Link';
         
         // Busca texto de mensagens anteriores para usar como body
-        let bodyText = ' '; // Texto padrão mínimo
+        let bodyText = 'Clique no botão para abrir o link'; // Texto padrão (Meta API requer pelo menos 1 caractere válido)
         if (allMessages) {
           // Encontra a posição da imagem atual
           const imageIndex = allMessages.findIndex(m => m.id === msg.id);
@@ -92,6 +92,33 @@ export function transformImageMessages(
           }
         }
         
+        // Garante que bodyText não seja vazio (Meta API requer pelo menos 1 caractere válido)
+        const normalizedBodyText = bodyText.trim() || 'Clique no botão para abrir o link';
+        
+        // Validações antes de criar a mensagem
+        if (!msg.content.url || msg.content.url.trim() === '') {
+          console.error('[TypebotToWhatsApp] ❌ Erro: URL da imagem está ausente ou vazia');
+          throw new Error('URL da imagem é obrigatória para mensagem interativa CTA URL');
+        }
+        
+        if (!msg.content.clickLink.url || msg.content.clickLink.url.trim() === '') {
+          console.error('[TypebotToWhatsApp] ❌ Erro: URL do CTA está ausente ou vazia');
+          throw new Error('URL do CTA é obrigatória para mensagem interativa CTA URL');
+        }
+        
+        if (!buttonTitle || buttonTitle.trim() === '') {
+          console.error('[TypebotToWhatsApp] ❌ Erro: Título do botão está ausente ou vazio');
+          throw new Error('Título do botão é obrigatório para mensagem interativa CTA URL');
+        }
+        
+        console.log('[TypebotToWhatsApp] ✅ Criando mensagem interativa CTA URL:', {
+          imageUrl: msg.content.url.substring(0, 50),
+          ctaUrl: msg.content.clickLink.url.substring(0, 50),
+          buttonTitle: buttonTitle,
+          bodyTextLength: normalizedBodyText.length,
+          bodyTextPreview: normalizedBodyText.substring(0, 50),
+        });
+        
         return {
           messaging_product: 'whatsapp',
           recipient_type: 'individual',
@@ -102,17 +129,17 @@ export function transformImageMessages(
             header: {
               type: 'image',
               image: {
-                link: msg.content.url,
+                link: msg.content.url.trim(),
               },
             },
             body: {
-              text: bodyText.substring(0, 1024), // Limita a 1024 caracteres (limite do WhatsApp)
+              text: normalizedBodyText.substring(0, 1024), // Limita a 1024 caracteres (limite do WhatsApp)
             },
             action: {
               name: 'cta_url',
               parameters: {
-                display_text: buttonTitle.substring(0, 20), // Limita a 20 caracteres (limite do WhatsApp)
-                url: msg.content.clickLink.url,
+                display_text: buttonTitle.trim().substring(0, 20), // Limita a 20 caracteres (limite do WhatsApp)
+                url: msg.content.clickLink.url.trim(),
               },
             },
           },
