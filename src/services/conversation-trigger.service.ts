@@ -665,9 +665,11 @@ export class ConversationTriggerService {
       
       console.log('='.repeat(80) + '\n');
       
-      const whatsappMessages = transformTypebotResponseToWhatsApp(
+      const whatsappMessages = await transformTypebotResponseToWhatsApp(
         typebotResponseWithoutInput,
-        phoneNumber
+        phoneNumber,
+        conversationId,
+        inbox.id
       );
 
       if (whatsappMessages.length === 0) {

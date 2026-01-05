@@ -467,9 +467,11 @@ export class MessageHandler {
     }
 
     // Transforma resposta do Typebot em mensagens WhatsApp
-    const whatsappMessages = transformTypebotResponseToWhatsApp(
+    const whatsappMessages = await transformTypebotResponseToWhatsApp(
       typebotResponse,
-      phoneNumber
+      phoneNumber,
+      conversationId,
+      inbox.id
     );
 
     console.log(`[MessageHandler] 📤 Mensagens WhatsApp geradas: ${whatsappMessages.length}`);
@@ -664,9 +666,11 @@ export class MessageHandler {
       throw new Error(`Tenant ${inbox.tenant_id} não encontrado`);
     }
 
-    const whatsappMessages = transformTypebotResponseToWhatsApp(
+    const whatsappMessages = await transformTypebotResponseToWhatsApp(
       typebotResponse,
-      phoneNumber
+      phoneNumber,
+      conversationId,
+      inbox.id
     );
 
     for (const whatsappMessage of whatsappMessages) {
