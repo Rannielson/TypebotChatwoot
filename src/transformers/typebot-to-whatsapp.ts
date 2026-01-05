@@ -594,46 +594,75 @@ export async function transformTypebotResponseToWhatsApp(
       other: typebotResponse.messages.length - textMessages.length - imageMessages.length,
     });
 
-    // Para interactive list, não envia mensagens de texto separadamente
-  // pois elas serão usadas como header, body, footer e button text
-  // Mas para interactive buttons, ainda envia as mensagens de texto
-  const choiceInput = typebotResponse.input?.type === 'choice input' 
-    ? (typebotResponse.input as TypebotChoiceInput)
-    : null;
-  const shouldSkipTextMessages = choiceInput && choiceInput.items.length > 3;
-
-  if (!shouldSkipTextMessages && textMessages.length > 0) {
-    const transformedTextMessages = transformTextMessages(textMessages, to);
-    console.log(`[TypebotToWhatsApp] 📤 Adicionando ${transformedTextMessages.length} mensagem(ns) de texto:`, 
-      transformedTextMessages.map(m => ({
-        type: m.type,
-        content: m.text.body.substring(0, 50),
-      }))
-    );
+    // Identifica mensagens de texto que estão imediatamente antes de uma imagem com clickLink
+    // Essas mensagens NÃO devem ser enviadas separadamente, pois serão usadas apenas como bodyText da mensagem interativa
+    const textMessagesToSkip = new Set<string>();
     
-    // Armazena mensagens de texto recentes no Redis para uso posterior com imagens
-    // TTL de 30 segundos (tempo suficiente para processar imagem na próxima resposta)
-    if (conversationId && inboxId) {
-      const recentTextsKey = `recent-texts:${inboxId}:${conversationId}`;
-      const recentTexts = textMessages.map(msg => {
-        const extractedText = extractTextFromRichText(msg.content.richText);
-        return {
-          id: msg.id,
-          text: extractedText,
-          timestamp: Date.now(),
-        };
-      });
-      
-      try {
-        await redis.set(recentTextsKey, JSON.stringify(recentTexts), 30); // TTL de 30 segundos
-        console.log(`[TypebotToWhatsApp] 💾 Armazenadas ${recentTexts.length} mensagem(ns) de texto recente(s) no Redis para conversa ${conversationId}`);
-      } catch (error: any) {
-        console.error('[TypebotToWhatsApp] ❌ Erro ao armazenar textos recentes no Redis:', error.message);
+    imageMessages.forEach((imageMsg) => {
+      if (imageMsg.content.clickLink?.url) {
+        // Encontra a posição da imagem no array de mensagens
+        const imageIndex = typebotResponse.messages.findIndex(m => m.id === imageMsg.id);
+        
+        // Se há uma mensagem de texto imediatamente antes desta imagem, marca para não enviar
+        if (imageIndex > 0 && typebotResponse.messages[imageIndex - 1].type === 'text') {
+          const textMsgBefore = typebotResponse.messages[imageIndex - 1] as TypebotTextMessage;
+          textMessagesToSkip.add(textMsgBefore.id);
+          
+          console.log(`[TypebotToWhatsApp] ⏭️ Mensagem de texto antes de imagem com clickLink será usada apenas como bodyText:`, {
+            textMessageId: textMsgBefore.id,
+            imageMessageId: imageMsg.id,
+            textPreview: extractTextFromRichText(textMsgBefore.content.richText).substring(0, 50),
+          });
+        }
       }
+    });
+
+    // Para interactive list, não envia mensagens de texto separadamente
+    // pois elas serão usadas como header, body, footer e button text
+    // Mas para interactive buttons, ainda envia as mensagens de texto
+    const choiceInput = typebotResponse.input?.type === 'choice input' 
+      ? (typebotResponse.input as TypebotChoiceInput)
+      : null;
+    const shouldSkipTextMessages = choiceInput && choiceInput.items.length > 3;
+
+    // Filtra mensagens de texto que devem ser enviadas (exclui as que estão antes de imagens com clickLink)
+    const textMessagesToSend = textMessages.filter(msg => !textMessagesToSkip.has(msg.id));
+
+    if (!shouldSkipTextMessages && textMessagesToSend.length > 0) {
+      const transformedTextMessages = transformTextMessages(textMessagesToSend, to);
+      console.log(`[TypebotToWhatsApp] 📤 Adicionando ${transformedTextMessages.length} mensagem(ns) de texto:`, 
+        transformedTextMessages.map(m => ({
+          type: m.type,
+          content: m.text.body.substring(0, 50),
+        }))
+      );
+      
+      // Armazena mensagens de texto recentes no Redis para uso posterior com imagens
+      // TTL de 30 segundos (tempo suficiente para processar imagem na próxima resposta)
+      // IMPORTANTE: Armazena TODAS as mensagens de texto (incluindo as que serão usadas como bodyText)
+      if (conversationId && inboxId) {
+        const recentTextsKey = `recent-texts:${inboxId}:${conversationId}`;
+        const recentTexts = textMessages.map(msg => {
+          const extractedText = extractTextFromRichText(msg.content.richText);
+          return {
+            id: msg.id,
+            text: extractedText,
+            timestamp: Date.now(),
+          };
+        });
+        
+        try {
+          await redis.set(recentTextsKey, JSON.stringify(recentTexts), 30); // TTL de 30 segundos
+          console.log(`[TypebotToWhatsApp] 💾 Armazenadas ${recentTexts.length} mensagem(ns) de texto recente(s) no Redis para conversa ${conversationId}`);
+        } catch (error: any) {
+          console.error('[TypebotToWhatsApp] ❌ Erro ao armazenar textos recentes no Redis:', error.message);
+        }
+      }
+      
+      whatsappMessages.push(...transformedTextMessages);
+    } else if (textMessagesToSkip.size > 0) {
+      console.log(`[TypebotToWhatsApp] ⏭️ ${textMessagesToSkip.size} mensagem(ns) de texto não serão enviadas (serão usadas apenas como bodyText de mensagens interativas)`);
     }
-    
-    whatsappMessages.push(...transformedTextMessages);
-  }
 
     // Transforma e adiciona mensagens de imagem
     // Passa todas as mensagens para que possa buscar texto anterior para usar como body
